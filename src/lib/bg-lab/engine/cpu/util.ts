@@ -17,7 +17,11 @@ export const luma601 = (r: number, g: number, b: number) => 0.299 * r + 0.587 * 
 // --- linear-light helpers (canvas pixels are 8-bit sRGB) ---
 // Cheap sRGB↔linear (pow 2.2). Use for gamma-correct coverage/averaging in ops
 // that resample (halftone coverage, dither quantize) so mid-tones aren't crushed.
-export const srgbToLin = (c: number) => Math.pow(c / 255, 2.2);
+// Canvas channels are 8-bit, so sRGB→linear is a 256-entry table lookup — the
+// dither/halftone hot loops call this ~3×/pixel and Math.pow there dominated.
+const SRGB_LIN = new Float32Array(256);
+for (let i = 0; i < 256; i++) SRGB_LIN[i] = Math.pow(i / 255, 2.2);
+export const srgbToLin = (c: number) => SRGB_LIN[c < 0 ? 0 : c > 255 ? 255 : c | 0];
 export const linToSrgb = (l: number) => Math.pow(Math.max(0, l), 1 / 2.2) * 255;
 /** Rec.601 luminance computed in linear light, returned 0..1. */
 export const linLuma601 = (r: number, g: number, b: number) =>

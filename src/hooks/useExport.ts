@@ -23,6 +23,10 @@ function download(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
+/** Yield a macrotask so React can flush state (spinner/progress) and the
+ * browser can paint before the next synchronous render/encode block. */
+const yieldToUI = () => new Promise<void>((res) => setTimeout(res, 0));
+
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
   const target = Math.min(t, Math.max(0, (video.duration || 0) - 0.001));
   // Assigning currentTime to its current value fires no "seeked" event — resolve
@@ -50,7 +54,7 @@ export function useExport() {
   const cpu = () => (cpuRef.current ??= createEngine("cpu"));
   const gl = () => (glRef.current ??= createEngine("gl"));
 
-  function exportStill(
+  async function exportStill(
     config: BgConfig,
     engineSource: EngineSource,
     opts: { format?: StillFormat; scale?: number } = {},
@@ -66,8 +70,14 @@ export function useExport() {
       return;
     }
     setExporting(true);
+    // The full-res CPU render below is one long synchronous block — yield first
+    // so the "exporting" state actually paints before the UI freezes.
+    await yieldToUI();
     try {
       const canvas = document.createElement("canvas");
+      // ARCHITECTURE CONSTRAINT: still export uses the CPU engine — the CPU op is
+      // the source of truth (GL is the preview accelerator). Don't switch this to
+      // GL without pixel-parity guarantees (docs/effects-lab-handoff.md, F0).
       const engine = cpu();
       engine.setSource(engineSource);
       engine.render(canvas, config, dims);
@@ -134,6 +144,10 @@ export function useExport() {
       for (let i = 0; i < frames; i++) {
         const t = start + i / fps;
         if (video) await seek(video, t);
+        // Without a real yield the whole loop runs as one task (seek can resolve
+        // synchronously; GIF quantize + CPU renders are sync) — progress would
+        // never paint until the export finishes.
+        await yieldToUI();
         engine.setSource(engineSource);
         try {
           engine.render(canvas, config, dims, t);

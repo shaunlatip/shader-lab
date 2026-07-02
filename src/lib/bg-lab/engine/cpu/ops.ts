@@ -235,6 +235,11 @@ const dither: Op = (canvas, p, u) => {
 
   const isDiffusion = type === "floydSteinberg" || type === "atkinson" || type === "sierra";
 
+  // Quantized output takes only L distinct linear levels i/(L-1) — precompute
+  // their sRGB bytes once instead of calling linToSrgb (Math.pow) per pixel.
+  const outLevels = new Uint8ClampedArray(L);
+  for (let i = 0; i < L; i++) outLevels[i] = linToSrgb(i / (L - 1));
+
   if (isDiffusion) {
     // --- error-diffusion family — all work in linear light ---
     const ch = mono ? 1 : 3;
@@ -290,15 +295,16 @@ const dither: Op = (canvas, p, u) => {
         }
       }
     }
-    // Write back: linear→sRGB
+    // Write back: linear→sRGB. After the full diffusion pass every buf value is
+    // exactly a quantized level i/(L-1), so index the precomputed table.
     for (let y = 0; y < H; y++)
       for (let x = 0; x < W; x++) {
         const pi = (y * W + x) * 4;
         if (mono) {
-          const v = linToSrgb(buf[y * W + x]);
+          const v = outLevels[Math.round(buf[y * W + x] * (L - 1))];
           d[pi] = d[pi + 1] = d[pi + 2] = v;
         } else {
-          for (let k = 0; k < 3; k++) d[pi + k] = linToSrgb(buf[(y * W + x) * 3 + k]);
+          for (let k = 0; k < 3; k++) d[pi + k] = outLevels[Math.round(buf[(y * W + x) * 3 + k] * (L - 1))];
         }
       }
   } else {
@@ -311,13 +317,13 @@ const dither: Op = (canvas, p, u) => {
         if (mono) {
           // quantize in linear light
           const vLin = 0.299 * srgbToLin(d[si]) + 0.587 * srgbToLin(d[si + 1]) + 0.114 * srgbToLin(d[si + 2]);
-          const qLin = clamp(Math.round(vLin * (L - 1) + m), 0, L - 1) / (L - 1);
-          d[pi] = d[pi + 1] = d[pi + 2] = linToSrgb(qLin);
+          const qi = clamp(Math.round(vLin * (L - 1) + m), 0, L - 1);
+          d[pi] = d[pi + 1] = d[pi + 2] = outLevels[qi];
         } else {
           for (let k = 0; k < 3; k++) {
             const vLin = srgbToLin(d[si + k]);
-            const qLin = clamp(Math.round(vLin * (L - 1) + m), 0, L - 1) / (L - 1);
-            d[pi + k] = linToSrgb(qLin);
+            const qi = clamp(Math.round(vLin * (L - 1) + m), 0, L - 1);
+            d[pi + k] = outLevels[qi];
           }
         }
       }

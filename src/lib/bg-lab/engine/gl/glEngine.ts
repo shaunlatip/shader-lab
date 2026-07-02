@@ -37,6 +37,10 @@ export class GLEngine implements RenderEngine {
   private glc: GLContext;
   private a: GLTexture | null = null;
   private b: GLTexture | null = null;
+  /** Cached composited base (see render). Never a ping-pong write target. */
+  private baseTex: GLTexture | null = null;
+  private baseSig: string | null = null;
+  private baseRef: unknown = null;
   private base: HTMLCanvasElement | null = null;
   private bridge: HTMLCanvasElement | null = null;
   private t0 = 0;
@@ -56,8 +60,11 @@ export class GLEngine implements RenderEngine {
     if (W > max || H > max) throw new Error("gl-dims-too-large");
     if (this.a) gl.deleteTexture(this.a.tex), gl.deleteFramebuffer(this.a.fbo);
     if (this.b) gl.deleteTexture(this.b.tex), gl.deleteFramebuffer(this.b.fbo);
+    if (this.baseTex) gl.deleteTexture(this.baseTex.tex), gl.deleteFramebuffer(this.baseTex.fbo);
     this.a = this.glc.createTexture(W, H);
     this.b = this.glc.createTexture(W, H);
+    this.baseTex = this.glc.createTexture(W, H);
+    this.baseSig = null; // buffer contents are gone — force a recomposite
   }
 
   private scratch(which: "base" | "bridge", W: number, H: number): HTMLCanvasElement {
@@ -80,29 +87,50 @@ export class GLEngine implements RenderEngine {
     if (!this.t0) this.t0 = performance.now();
     const t = time ?? (performance.now() - this.t0) / 1000;
 
-    // --- base: composite source on a 2D scratch (exact CPU letterboxing), upload
+    // --- base: composite source on a 2D scratch (exact CPU letterboxing), upload.
+    // The composited base is cached in `baseTex`: for a static source (image /
+    // pattern / solid) the 2D composite + full texImage2D upload only happen when
+    // the source, transform, or dims change — animated stacks (grain `animate`
+    // etc.) otherwise pay that CPU+upload cost on every rAF frame for identical
+    // pixels. Video always recomposites (each frame differs). The per-frame cost
+    // when cached is one GPU-side blit (glc.copy) into the ping-pong chain.
     const u = unit(W);
-    const base = this.scratch("base", W, H);
-    const bctx = ctx2d(base);
-    bctx.clearRect(0, 0, W, H);
-    if (this.src && (this.src.kind === "image" || this.src.kind === "video")) {
-      const im = this.src.kind === "image" ? this.src.image : (this.src as { video: HTMLVideoElement }).video;
-      const iw = ((im as { width?: number; videoWidth?: number }).videoWidth || (im as { width?: number }).width || W) as number;
-      const ih = ((im as { height?: number; videoHeight?: number }).videoHeight || (im as { height?: number }).height || H) as number;
-      try {
-        drawTransformedSource(bctx, base, im as CanvasImageSource, iw, ih, W, H, config.source.transform);
-      } catch {
-        /* video not ready yet — leave cleared */
+    const isVideo = this.src?.kind === "video";
+    const sig = JSON.stringify({
+      k: this.src?.kind ?? "none",
+      t: config.source.transform ?? null,
+      p: this.src?.kind === "pattern" ? this.src.pattern : null,
+      c: this.src?.kind === "solid" ? this.src.color : null,
+      W,
+      H,
+    });
+    const ref = this.src?.kind === "image" ? this.src.image : this.src?.kind === "video" ? this.src.video : null;
+    if (isVideo || sig !== this.baseSig || ref !== this.baseRef) {
+      const base = this.scratch("base", W, H);
+      const bctx = ctx2d(base);
+      bctx.clearRect(0, 0, W, H);
+      if (this.src && (this.src.kind === "image" || this.src.kind === "video")) {
+        const im = this.src.kind === "image" ? this.src.image : (this.src as { video: HTMLVideoElement }).video;
+        const iw = ((im as { width?: number; videoWidth?: number }).videoWidth || (im as { width?: number }).width || W) as number;
+        const ih = ((im as { height?: number; videoHeight?: number }).videoHeight || (im as { height?: number }).height || H) as number;
+        try {
+          drawTransformedSource(bctx, base, im as CanvasImageSource, iw, ih, W, H, config.source.transform);
+        } catch {
+          /* video not ready yet — leave cleared */
+        }
+      } else if (this.src && this.src.kind === "pattern") {
+        drawPattern(bctx, W, H, this.src.pattern, u);
+      } else {
+        bctx.fillStyle = this.src && this.src.kind === "solid" ? this.src.color : DEFAULT_BG;
+        bctx.fillRect(0, 0, W, H);
       }
-    } else if (this.src && this.src.kind === "pattern") {
-      drawPattern(bctx, W, H, this.src.pattern, u);
-    } else {
-      bctx.fillStyle = this.src && this.src.kind === "solid" ? this.src.color : DEFAULT_BG;
-      bctx.fillRect(0, 0, W, H);
+      this.glc.uploadExternal(this.baseTex!, base);
+      this.baseSig = sig;
+      this.baseRef = ref;
     }
     let cur = this.a!,
       other = this.b!;
-    this.glc.uploadExternal(cur, base);
+    this.glc.copy(this.baseTex!, cur);
 
     // --- stack
     for (const eff of config.stack) {
@@ -143,7 +171,10 @@ export class GLEngine implements RenderEngine {
     const gl = this.glc.gl;
     if (this.a) gl.deleteTexture(this.a.tex), gl.deleteFramebuffer(this.a.fbo);
     if (this.b) gl.deleteTexture(this.b.tex), gl.deleteFramebuffer(this.b.fbo);
-    this.a = this.b = null;
+    if (this.baseTex) gl.deleteTexture(this.baseTex.tex), gl.deleteFramebuffer(this.baseTex.fbo);
+    this.a = this.b = this.baseTex = null;
+    this.baseSig = null;
+    this.baseRef = null;
     this.glc.dispose();
     this.src = null;
   }
