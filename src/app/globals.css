@@ -1,26 +1,1092 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
+/* Align Tailwind's `dark:` variant with the project's data-theme strategy.
+ * Without this, `dark:foo` only fires on `prefers-color-scheme: dark` —
+ * the in-app theme toggle (which sets `[data-theme="dark"]` on <html>)
+ * has no effect on Tailwind utility variants. With this rule, any
+ * `dark:foo` utility evaluates against `[data-theme="dark"]` ancestors,
+ * so the in-app toggle actually drives `dark:` styles. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Emulsion (background lab): neutralize the brand accent within the tool so
+ * shadcn's *-accent hover/focus/ring states (outline + ghost button hovers,
+ * select-item focus, etc.) render in shades instead of cinnabar. Applied to the
+ * lab root and to its portaled menus/dialogs (which live outside that root).
+ * Light-mode editorial surface → a soft light-gray hover fill. */
+.lab-chrome {
+  --color-accent: var(--color-shade-9);
+}
+
+/* ── Global custom cursors (Nucleo) ──────────────────────────────────────
+ * Native CSS cursor swap — the OS draws these on its own compositor layer,
+ * so they never lag and cost no main-thread work. Each var carries a hotspot
+ * (x y, the click point in the 32×32 grid) plus a native-keyword fallback so
+ * behavior degrades gracefully if an SVG can't load or filters are dropped.
+ * Assets live in /public/cursors/ (white border + #040404 core + soft shadow,
+ * legible on both light and dark surfaces — one set covers both themes).
+ *
+ * Applied only on fine/hover pointers: touch + coarse devices keep their
+ * native (invisible) cursor and pay nothing. The element-default rules use
+ * :where() (0 specificity) and the disabled rule is ordered last so it wins
+ * over the pointer/text rules for disabled elements by source order — no
+ * :not() chains, which would inflate specificity and clobber the utilities.
+ * The utility remaps are unlayered so they beat Tailwind's own generated
+ * .cursor-* rules at equal specificity; the variant remaps replicate the
+ * compiled selectors of the variant utilities in use (hover:/active:/
+ * disabled:) so those win too. Together they swap the bitmap for every state
+ * already expressed across the site with zero per-component edits. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --cur-default:     url('/cursors/default.svg') 11 10, auto;
+  --cur-pointer:     url('/cursors/pointer.svg') 13 7, pointer;
+  --cur-text:        url('/cursors/text.svg') 16 16, text;
+  --cur-grab:        url('/cursors/grab.svg') 16 14, grab;
+  --cur-grabbing:    url('/cursors/grabbing.svg') 16 18, grabbing;
+  --cur-col-resize:  url('/cursors/col-resize.svg') 16 16, col-resize;
+  --cur-not-allowed: url('/cursors/not-allowed.svg') 6 6, not-allowed;
+  --cur-zoom-in:     url('/cursors/zoom-in.svg') 14 14, zoom-in;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@media (any-hover: hover) and (any-pointer: fine) {
+  html { cursor: var(--cur-default); }
+
+  /* Element defaults (all 0 specificity via :where). Pointer + text first,
+   * disabled last so it wins for disabled elements by source order. */
+  :where(a[href], button, [role="button"], [role="tab"], [role="combobox"],
+         [role="menuitem"], [role="option"], summary, label[for], select,
+         input[type="color"], [data-slot="switch"], [data-slot="slider-thumb"]) {
+    cursor: var(--cur-pointer);
+  }
+
+  :where(input:not([type]), input[type="text"], input[type="search"],
+         input[type="email"], input[type="url"], input[type="tel"],
+         input[type="password"], input[type="number"], textarea,
+         [contenteditable="true"], [contenteditable=""]) {
+    cursor: var(--cur-text);
+  }
+
+  :where(:disabled, [data-disabled], [aria-disabled="true"]) {
+    cursor: var(--cur-not-allowed);
+  }
+
+  /* Remap the Tailwind cursor-* utilities already used across components
+   * (EffectCard grab/grabbing, BgLab col-resize, PrintStack grab, ds zoom-in,
+   * disabled controls) so they adopt the custom bitmaps. Unlayered → wins
+   * over Tailwind's generated utilities at equal specificity. */
+  .cursor-default     { cursor: var(--cur-default); }
+  .cursor-pointer     { cursor: var(--cur-pointer); }
+  .cursor-text        { cursor: var(--cur-text); }
+  .cursor-grab        { cursor: var(--cur-grab); }
+  .cursor-grabbing    { cursor: var(--cur-grabbing); }
+  .cursor-col-resize  { cursor: var(--cur-col-resize); }
+  .cursor-ew-resize   { cursor: var(--cur-col-resize); }
+  .cursor-not-allowed { cursor: var(--cur-not-allowed); }
+  .cursor-zoom-in     { cursor: var(--cur-zoom-in); }
+
+  /* Variant utilities in use across the site compile to higher-specificity
+   * selectors (state pseudo-class adds 0,1,0), so the base remaps above miss
+   * them. Replicate the compiled selectors unlayered so the custom bitmap
+   * wins during hover / active-drag / disabled too. */
+  .hover\:cursor-pointer:hover      { cursor: var(--cur-pointer); }
+  .active\:cursor-grabbing:active   { cursor: var(--cur-grabbing); }
+  .disabled\:cursor-not-allowed:disabled { cursor: var(--cur-not-allowed); }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Body scroll lock for nav sheets / overlays. Components toggle this
+ * class on <html> when their sheet is open. Class-based locking is
+ * idempotent and survives Next.js page transitions cleanly — direct
+ * `document.body.style.overflow` mutation can leak through if a route
+ * change happens mid-cleanup. Single class shared across nav variants
+ * (M1A, M1B, M2, etc.) since only one sheet is ever open at a time. */
+html.nav-sheet-open {
+  overflow: hidden;
+}
+
+/* Intro curtain: match the scrollbar gutter to the curtain.
+ * `scrollbar-gutter: stable` reserves a strip in the viewport canvas that the
+ * curtain (position: fixed) cannot paint over — fixed boxes are confined to the
+ * content box, while the gutter is drawn outside it. The gutter shows the root
+ * element's *propagated* background, so the only way to darken it is to darken
+ * <html> itself. While the curtain covers the screen, paint the canvas the
+ * curtain colour so the gutter blends instead of flashing a white sliver in
+ * light mode (dark mode already blends). `:has()` applies from the first
+ * server-rendered frame. */
+html:has(#intro-root[data-phase="cover"]) {
+  background: #141517;
+}
+
+/* As the curtain lifts away (reveal phase), fade the canvas back to the page
+ * colour in lock-step with the curtain's travel. Holding it dark until the
+ * curtain unmounts left the gutter as a black strip beside the already-revealed
+ * page. Matching the curtain's exact duration + easing (EXIT = 820ms,
+ * cubic-bezier(0.85, 0, 0.15, 1) in IntroLoader) keeps the two synced: the
+ * easing's slow start keeps the gutter dark while the curtain still covers the
+ * screen, then lightens it as the curtain whips up — no lingering box, no early
+ * white flash. */
+html:has(#intro-root[data-phase="reveal"]) {
+  background: var(--color-canvas);
+  transition: background-color 820ms cubic-bezier(0.85, 0, 0.15, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Reduced motion fades the curtain (opacity) over EXIT_REDUCED = 350ms
+   * instead of translating it; match that so the gutter fades in step. */
+  html:has(#intro-root[data-phase="reveal"]) {
+    transition: background-color 350ms ease;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Theme toggle cross-fade via the View Transitions API.
+ * The `ThemeToggle` in NavigationBar.tsx wraps `setTheme()` in
+ * `document.startViewTransition()`. The browser snapshots the page before and
+ * after the theme flip and cross-fades the two, so every element — nav, footer,
+ * cards, text — flips in one compositor-driven fade with zero per-element
+ * transition rules.
+ *
+ * Browsers without support (Firefox, older Safari) fall through to an instant
+ * flip — acceptable progressive enhancement. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+  animation-timing-function: ease;
+}
+
+/* Theme toggle circle is pulled out of the page snapshot so it doesn't
+ * crossfade with itself (the snapshot mechanism fades opacity to 0 at the
+ * midpoint, which read as "the circle disappears mid-flip"). With its own
+ * view-transition-name and zero-duration animation, the circle's color
+ * snaps to the new theme value instantly while the rest of the page
+ * continues to crossfade smoothly behind it. */
+.theme-toggle-circle {
+  view-transition-name: theme-toggle-circle;
+}
+.theme-toggle-circle-topbar {
+  view-transition-name: theme-toggle-circle-topbar;
+}
+::view-transition-old(theme-toggle-circle),
+::view-transition-new(theme-toggle-circle),
+::view-transition-old(theme-toggle-circle-topbar),
+::view-transition-new(theme-toggle-circle-topbar) {
+  animation-duration: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/*
+ * Design Tokens — 16px root
+ * Source of truth: Figma frame 866-201
+ *
+ * Typography scale:
+ *   Headings (rem — scale with root font-size):
+ *     hero: 92px (5.75rem), h1: 72px (4.5rem), h2: 60px (3.75rem),
+ *     h3: 48px (3rem), h4: 36px (2.25rem), h5: 30px (1.875rem), h6: 24px (1.5rem)
+ *   Body (px — fixed, do not scale with root):
+ *     xl: 20px, lg: 18px, base: 16px, sm: 14px,
+ *     cap-tag: 14px (semibold, 0.7px tracking), caption: 12px
+ *     subtitle1: 20px semibold, subtitle2: 16px semibold
+ *
+ * Structural headings (h1–h6 base layer): Poppins at fixed 500/600 cuts.
+ * Body remains Switzer.
+ */
+@theme extend {
+  /*
+   * --- Typography: font-size tokens ---
+   * SYNC: If you add/rename/remove a token here, update the matching
+   *       utility class in the @layer utilities block at the bottom of
+   *       this file. Tailwind v4 does not auto-generate utilities for
+   *       custom font-size tokens in our Next.js pages router setup.
+   */
+
+  /* Body sizes (px — fixed, don't scale with root) */
+  --font-size-caption: 12px;
+  --font-size-caption--line-height: 1.5;
+
+  /* cap-tag is the eyebrow / category-label size. 13px sits in Linear /
+   * Vercel range for label text; 1.4 line-height is label rhythm vs.
+   * body's 1.5. .text-cap-tag adds font-weight: 600 (pinned so all-caps
+   * doesn't drift) and font-feature-settings: "case" on (re-aligns
+   * parens, hyphens, dashes to cap-height — a no-op for lowercase).
+   *
+   * Phase 2 (2026-05-08): tightened from 12px / 500 / 0.08em to
+   * 13px / 600 / 0.04em. Switzer's caps at the previous setting had a
+   * sub-pixel rendering issue — the top scanline clipped because cap
+   * stems were too thin to survive AA rounding AND the 12px cap-top
+   * position fell on a fractional pixel boundary. The size bump from
+   * 12→13 was the missing piece: weight + tracking weren't enough on
+   * their own at 12px (validated in Section B of /typography-explore
+   * after the first round of fixes — weight/tracking-only still showed
+   * the clip at 12px, fully resolved at 13px). Diagnostic ladder in
+   * § D. Original tuning rationale (Butterick's 0.05–0.12em range)
+   * preserved in git history. */
+  --font-size-cap-tag: 13px;
+  --font-size-cap-tag--line-height: 1.4;
+  --font-size-cap-tag--letter-spacing: 0.04em;
+
+  /* Heading sizes (rem — scale with root).
+   * Letter-spacing scales inversely with size: bigger gets tighter tracking
+   * to compensate optically for the lighter weights at display sizes (see
+   * font-weight gradient below + docs/font-fixes-decisions.md § Phase 2). */
+
+  --font-size-h6: 1.5rem;
+  --font-size-h6--line-height: 1.32;
+  --font-size-h6--letter-spacing: 0;
+
+  --font-size-h5: 1.875rem;
+  --font-size-h5--line-height: 1.24;
+  --font-size-h5--letter-spacing: -0.01em;
+
+  --font-size-h4: 2.25rem;
+  --font-size-h4--line-height: 1.18;
+  --font-size-h4--letter-spacing: -0.015em;
+
+  --font-size-h3: 3rem;
+  --font-size-h3--line-height: 1.12;
+  --font-size-h3--letter-spacing: -0.025em;
+
+  --font-size-h2: 3.75rem;
+  --font-size-h2--line-height: 1.05;
+  --font-size-h2--letter-spacing: -0.035em;
+
+  --font-size-h1: 4.5rem;
+  --font-size-h1--line-height: 1;
+  --font-size-h1--letter-spacing: -0.04em;
+
+  --font-size-hero: 5.75rem;
+  --font-size-hero--line-height: 1;
+  --font-size-hero--letter-spacing: -0.045em;
+
+  /* --- Font families --- */
+  --font-sans: var(--font-switzer), var(--font-inter), system-ui, sans-serif;
+  /* Host Grotesk is the heading family — drives h1–h6 base rule and all
+   * .text-h* utilities. Two exceptions opt back to Switzer via .font-sans:
+   * writing article titles, and the navbar wordmark (which isn't a heading
+   * anyway). */
+  --font-heading: var(--font-host-grotesk), var(--font-switzer), system-ui, sans-serif;
+  --font-serif: var(--font-lora), Georgia, serif;
+  /* Work Sans — scoped sans for Emulsion (the background lab). Drives the
+     `font-lab` utility; not used elsewhere on the site. */
+  --font-lab: var(--font-work-sans), var(--font-switzer), system-ui, sans-serif;
+  /* Emulsion display/title face (wordmark + effect titles), drives `font-nagel`.
+     Nagel Variable is a bold geometric display sans (Adobe Fonts, likely a paid
+     Creative Cloud font) — loaded via a Typekit kit when NEXT_PUBLIC_ADOBE_FONTS_URL
+     is set (see pages/_document.tsx). Until then it falls back to Archivo, a free
+     Google grotesque that stands in for the same display character.
+     ↓ To experiment with a different display font, swap the Archivo fallback for
+     any other loaded family (e.g. another Google font wired in pages/_app.tsx). */
+  --font-nagel: "nagel-variable", var(--font-archivo), system-ui, sans-serif;
+  --font-inter: var(--font-inter), system-ui, sans-serif;
+  /* Mono is an accent family layered onto the same size scale as --font-sans.
+     Use with existing text-* tokens: `text-base font-mono`, `text-cap-tag font-mono`.
+     Intended scope: literal technical values only — code, file paths, versions, keyboard
+     shortcuts, tabular numerics. NOT for eyebrow labels, section markers, or anything that
+     reads as prose. The test: if copying the text verbatim into a terminal would mean the
+     same thing, mono works. If not, sans. See CLAUDE.md § Mono accent. */
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* --- Font weights ---
+     Switzer is a variable font, so any weight in 100–900 is a real cut.
+     Locked map: hero/h1/h2/h3 = 450 (between Regular and Medium — punchy
+     without feeling display-bold), h4 = 500 (Medium — the transition step),
+     h5/h6 = 550 so the smallest headings hold presence against body copy. */
+  --font-weight-hero: 400;
+  --font-weight-h1: 400;
+  --font-weight-h2: 450;
+  --font-weight-h3: 450;
+  --font-weight-h4: 500;
+  --font-weight-h5: 550;
+  --font-weight-h6: 550;
+
+  /* --- Colors: Neutral scale (Tailwind Neutral, OKLCH, dark → light) ---
+   * True-gray scale (chroma = 0). Closes the long-standing gap between
+   * Phase 1's documented decision (Neutral beat Zinc) and the shipped
+   * values (which were Zinc). Reads cleaner against the warm accents
+   * (cinnabar H≈34, beige, stone) than the previous faintly-cool Zinc. */
+  --color-shade-1:  oklch(0.145 0 0);  /* neutral-950 */
+  --color-shade-2:  oklch(0.205 0 0);  /* neutral-900 */
+  --color-shade-3:  oklch(0.269 0 0);  /* neutral-800 */
+  --color-shade-4:  oklch(0.371 0 0);  /* neutral-700 */
+  --color-shade-5:  oklch(0.439 0 0);  /* neutral-600 */
+  --color-shade-6:  oklch(0.556 0 0);  /* neutral-500 */
+  --color-shade-7:  oklch(0.708 0 0);  /* neutral-400 */
+  --color-shade-8:  oklch(0.870 0 0);  /* neutral-300 */
+  --color-shade-9:  oklch(0.922 0 0);  /* neutral-200 */
+  --color-shade-10: oklch(0.970 0 0);  /* neutral-100 */
+  --color-shade-11: oklch(0.985 0 0);  /* neutral-50  */
+
+  /* --- Colors: Surfaces --- */
+  --color-surface-white: #ffffff;
+  --color-surface-dark: oklch(0.205 0 0);  /* = shade-2 */
+
+  /* --- Colors: Cinnabar scale (OKLCH, H≈34.3) ---
+   * Generated scale anchored at cinnabar-500 = current brand (#f36545).
+   * L held on a perceptually uniform curve; C peaks mid-scale and tapers
+   * at the extremes where sRGB gamut can't hold high chroma.
+   * Modern browsers render these in wide gamut on P3 displays and fall
+   * back to sRGB with browser-native gamut mapping everywhere else. */
+  --color-cinnabar-50:  oklch(0.970 0.015 34.3);
+  --color-cinnabar-100: oklch(0.940 0.035 34.3);
+  --color-cinnabar-200: oklch(0.885 0.070 34.3);
+  --color-cinnabar-300: oklch(0.810 0.120 34.3);
+  --color-cinnabar-400: oklch(0.750 0.160 34.3);
+  --color-cinnabar-500: oklch(0.682 0.183 34.3);  /* = #f36545, current brand */
+  --color-cinnabar-600: oklch(0.605 0.175 34.3);
+  --color-cinnabar-700: oklch(0.515 0.150 34.3);
+  --color-cinnabar-800: oklch(0.435 0.125 34.3);
+  --color-cinnabar-900: oklch(0.375 0.100 34.3);
+  --color-cinnabar-950: oklch(0.255 0.070 34.3);
+
+  /* --- Colors: Accent (LEGACY — retired, do not use on new work) ---
+   * Cinnabar was the brand accent; it has been retired. This token is kept
+   * ONLY so pre-existing surfaces that already reference `text-accent`
+   * (legacy case studies, nav-link hover, markdown-viewer links) keep
+   * rendering unchanged. The site now composes in neutrals/shades; the only
+   * intentional accent is the teal scroll dot (#3DB0C7 in ScrollDot.tsx),
+   * placed by hand. Do NOT add `text-accent`/`bg-accent` to new work, and
+   * do NOT repoint this to the teal (that would recolor every legacy
+   * surface at once). See CLAUDE.md § No accent color. */
+  --color-accent: var(--color-cinnabar-500);  /* legacy cinnabar — retained for back-compat only */
+
+  /* --- Colors: Surface tints (decorative) --- */
+  --color-beige: #efece6;
+  --color-stone: #e1dfdd;
+
+  /* --- Colors: Semantic tokens (role-based, consumed by components) ---
+   * Raw shade scale stays available for the design system page + color-explore.
+   * Component code prefers these roles so dark-mode inversion happens in one
+   * place via the [data-theme="dark"] block below @theme. */
+  --color-canvas: #ffffff;
+  --color-canvas-elevated: var(--color-shade-10);
+  --color-canvas-inverted: var(--color-shade-1);
+  --color-text-primary: var(--color-shade-1);
+  --color-text-secondary: var(--color-shade-6);
+  --color-text-inverse: var(--color-shade-11);
+  --color-border-default: var(--color-shade-9);
+  --color-border-strong: var(--color-shade-8);
+
+  /* --- Inline link colors ---
+   * Two-tone system for inline body links.
+   *
+   * `--color-link` (primary-text contexts): pushed to the largest delta
+   * that still passes WCAG AA against canvas. shade-6 in light mode is
+   * 4.51:1 vs canvas (just passes); one more step (shade-7) drops to
+   * 2.44:1 (fails). shade-7 in dark is 6.62:1 vs canvas (passes
+   * comfortably; dark side has more contrast headroom).
+   *
+   * `--color-link-secondary` (secondary-text contexts): inversion rule.
+   * Goes one step toward text-primary so links advance through quiet
+   * text instead of disappearing into the gray.
+   *
+   * The component picks the right one via a `tone` prop. Both flip
+   * with theme. */
+  --color-link: var(--color-shade-6);
+  --color-link-secondary: var(--color-shade-2);
+
+  /* --- Layout --- */
+  --container-container: 1200px;
+  --container-container-sm: 1080px;
+  --container-section: 840px;
+
+  /* --- Border radius --- */
+  --radius-card: 16px;
+  --radius-frame: 12px;
+
+  /* --- Box shadows (1–5, each with two layers for depth) --- */
+  --shadow-1: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.24);
+  --shadow-2: 0 3px 6px rgba(0,0,0,.15), 0 2px 4px rgba(0,0,0,.12);
+  --shadow-3: 0 10px 20px rgba(0,0,0,.15), 0 3px 6px rgba(0,0,0,.10);
+  --shadow-4: 0 15px 25px rgba(0,0,0,.15), 0 5px 10px rgba(0,0,0,.05);
+  --shadow-5: 0 20px 40px rgba(0,0,0,.20), 0 8px 16px rgba(0,0,0,.08);
+}
+
+/* --- Theme color-scheme + per-theme semantic overrides ---
+ * @theme blocks only emit :root. Theme overrides must live outside @theme.
+ * color-scheme tells the browser how to paint native controls (scrollbars, form inputs).
+ *
+ * [data-theme="light"] is explicitly defined (not just :root) so that scoped
+ * overrides work correctly: a <div data-theme="light"> inside <html data-theme="dark">
+ * flips back to light values because this selector matches the div directly and
+ * stops the cascade-inheritance from the dark ancestor. */
+:root {
+  color-scheme: light;
+
+  /* Light defaults so the custom scrollbar is themed even on the first paint
+   * before next-themes sets [data-theme] (dark block overrides below). */
+  --scrollbar-thumb: rgba(20, 21, 23, 0.2);
+  --scrollbar-thumb-hover: rgba(20, 21, 23, 0.38);
+
+  /* Shadow-as-border light default (mirrors [data-theme="light"]) for the
+   * pre-hydration frame before [data-theme] is set. */
+  --shadow-border:
+    0px 0px 0px 1px rgba(0, 0, 0, 0.06),
+    0px 1px 2px -1px rgba(0, 0, 0, 0.06),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.04);
+  --shadow-border-hover:
+    0px 0px 0px 1px rgba(0, 0, 0, 0.08),
+    0px 1px 2px -1px rgba(0, 0, 0, 0.08),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --color-canvas: #ffffff;
+  --color-canvas-elevated: var(--color-shade-10);
+  --color-canvas-inverted: var(--color-shade-1);
+  --color-text-primary: var(--color-shade-1);
+  --color-text-secondary: var(--color-shade-6);
+  --color-text-inverse: var(--color-shade-11);
+  --color-border-default: var(--color-shade-9);
+  --color-border-strong: var(--color-shade-8);
+  --color-accent: var(--color-cinnabar-500);
+
+  /* Shadow-as-border — a 1px ring plus two faint lift layers, for bordered
+   * containers/chips that want depth instead of a hard hairline. The
+   * [data-theme="dark"] block collapses this to a single white ring (layered
+   * depth isn't visible on a dark surface). Consumed by the `.shadow-border`
+   * utility (see @layer utilities) so it resolves per theme at runtime. */
+  --shadow-border:
+    0px 0px 0px 1px rgba(0, 0, 0, 0.06),
+    0px 1px 2px -1px rgba(0, 0, 0, 0.06),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.04);
+  --shadow-border-hover:
+    0px 0px 0px 1px rgba(0, 0, 0, 0.08),
+    0px 1px 2px -1px rgba(0, 0, 0, 0.08),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.06);
+
+  --color-link: var(--color-shade-6);
+  --color-link-secondary: var(--color-shade-2);
+
+  /* Custom scrollbar thumb — translucent brand near-black, so the slim
+   * pill reads as a quiet neutral on the light canvas. */
+  --scrollbar-thumb: rgba(20, 21, 23, 0.2);
+  --scrollbar-thumb-hover: rgba(20, 21, 23, 0.38);
+
+  /* Glass-nav tint. --nav-tint-bg defaults to canvas so the tint is
+   * theme-colored. --nav-tint-alpha stays gentle over plain canvas;
+   * the boost/inversion rules below override both when a contrasting
+   * surface enters the nav's blur band. */
+  --nav-tint-bg: var(--color-canvas);
+  --nav-tint-alpha: 0.55;
+
+  /* Chip palette — desaturated, paper-like. Used by /archive/aesthetics
+   * category badges. Seven hues, identical chroma so they read as a set. */
+  --chip-people-bg: oklch(0.94 0.025 50);
+  --chip-people-fg: oklch(0.42 0.06 50);
+  --chip-company-bg: oklch(0.93 0.022 240);
+  --chip-company-fg: oklch(0.42 0.06 240);
+  --chip-editorial-bg: oklch(0.93 0.022 280);
+  --chip-editorial-fg: oklch(0.4 0.06 280);
+  --chip-brand-bg: oklch(0.94 0.028 75);
+  --chip-brand-fg: oklch(0.42 0.06 75);
+  --chip-library-bg: oklch(0.93 0.025 145);
+  --chip-library-fg: oklch(0.4 0.06 145);
+  --chip-gallery-bg: oklch(0.93 0.025 320);
+  --chip-gallery-fg: oklch(0.42 0.06 320);
+  --chip-experiment-bg: oklch(0.94 0.03 30);
+  --chip-experiment-fg: oklch(0.45 0.07 30);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-canvas: var(--color-shade-2);
+  --color-canvas-elevated: var(--color-shade-3);
+  --color-canvas-inverted: var(--color-shade-11);
+  --color-text-primary: var(--color-shade-11);
+  --color-text-secondary: var(--color-shade-7);
+  --color-text-inverse: var(--color-shade-1);
+  --color-border-default: var(--color-shade-4);
+  --color-border-strong: var(--color-shade-5);
+
+  /* Shadow-as-border, dark variant: a single white ring. The light-mode lift
+   * layers read as dirt on a dark surface, so collapse to the ring alone. */
+  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-border-hover: 0 0 0 1px rgba(255, 255, 255, 0.13);
+
+  /* Dark-mode accent: one step lighter on the cinnabar scale so it pops on shade-2. */
+  --color-accent: var(--color-cinnabar-400);
+
+  /* Inline link inversion in dark mode. */
+  --color-link: var(--color-shade-7);
+  --color-link-secondary: var(--color-shade-10);
+
+  /* Custom scrollbar thumb — translucent off-white for contrast on dark canvas. */
+  --scrollbar-thumb: rgba(250, 250, 250, 0.22);
+  --scrollbar-thumb-hover: rgba(250, 250, 250, 0.42);
+
+  /* Dark-mode base tint — stronger than light because dark canvas +
+   * light text needs more opacity to mask scrolling content. */
+  --nav-tint-bg: var(--color-canvas);
+  --nav-tint-alpha: 0.8;
+
+  /* Chip palette — dark variant. Lower bg lightness, higher fg lightness. */
+  --chip-people-bg: oklch(0.27 0.025 50);
+  --chip-people-fg: oklch(0.78 0.06 50);
+  --chip-company-bg: oklch(0.27 0.022 240);
+  --chip-company-fg: oklch(0.78 0.06 240);
+  --chip-editorial-bg: oklch(0.27 0.022 280);
+  --chip-editorial-fg: oklch(0.78 0.06 280);
+  --chip-brand-bg: oklch(0.28 0.028 75);
+  --chip-brand-fg: oklch(0.8 0.06 75);
+  --chip-library-bg: oklch(0.27 0.025 145);
+  --chip-library-fg: oklch(0.78 0.06 145);
+  --chip-gallery-bg: oklch(0.27 0.025 320);
+  --chip-gallery-fg: oklch(0.78 0.06 320);
+  --chip-experiment-bg: oklch(0.28 0.03 30);
+  --chip-experiment-fg: oklch(0.8 0.06 30);
+}
+
+/* ─── Nameplate badge (hero) ──────────────────────────────────────────
+ * The "Shaun Latip" identity plate on the print stack. Light mode: a dark
+ * plate on the white page. Dark mode: the relationship inverts to a light
+ * plate on the dark page, so it still reads as a physical card lifted off
+ * the surface. Compound shadow (contact / mid / ambient + inset top
+ * highlight) flips with the plate; light-mode intensity is kept gentle. */
+:root,
+[data-theme="light"] {
+  --nameplate-bg: linear-gradient(180deg, #161616, #0a0a0a 55%);
+  --nameplate-text: #f5f5f5;
+  --nameplate-border: rgba(255, 255, 255, 0.1);
+  --nameplate-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.24),
+    0 12px 28px -10px rgba(0, 0, 0, 0.32),
+    0 32px 64px -18px rgba(0, 0, 0, 0.34);
+}
+
+[data-theme="dark"] {
+  --nameplate-bg: linear-gradient(180deg, #fcfcfc, #ececec 60%);
+  --nameplate-text: #0a0a0a;
+  --nameplate-border: rgba(0, 0, 0, 0.08);
+  --nameplate-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 12px 28px -10px rgba(0, 0, 0, 0.5),
+    0 32px 64px -18px rgba(0, 0, 0, 0.55);
+}
+
+/* ─── Nav contrast boost ──────────────────────────────────────────────
+ * data-nav-boosted: same-theme surface, just high contrast (e.g. dark
+ *   photo on a dark page). Bumps tint alpha to near-opaque so the glass
+ *   locks luminance. Text color stays unchanged.
+ *
+ * data-nav-inverted: section theme differs from page theme (e.g. dark
+ *   section on a light page, or light cards on a dark page). Flips ALL
+ *   nav surface tokens — tint color, text, borders — to the opposite
+ *   theme. Both the blur-band tint (--nav-tint-bg, read by ProgressiveBlur)
+ *   and the nav element surface tokens (#navbar, #mobile-topbar) swap so
+ *   every visible nav element adapts to the section underneath. */
+
+/* Boost: opacity only */
+[data-theme="light"][data-nav-boosted="true"] {
+  --nav-tint-alpha: 0.85;
+}
+[data-theme="dark"][data-nav-boosted="true"] {
+  --nav-tint-alpha: 0.95;
+}
+
+/* Inversion: light page → dark nav */
+[data-theme="light"][data-nav-inverted="true"] {
+  --nav-tint-bg: var(--color-shade-2);
+  --nav-tint-alpha: 0.95;
+}
+/* Inversion: dark page → light nav */
+[data-theme="dark"][data-nav-inverted="true"] {
+  --nav-tint-bg: var(--color-shade-10);
+  --nav-tint-alpha: 0.95;
+}
+
+/* Scoped surface token overrides — only inside the nav elements.
+ * Overriding at #navbar / #mobile-topbar scope means these tokens
+ * propagate to all descendants (text-text-primary, bg-canvas, etc.)
+ * without touching any other page element. */
+/* The mobile top bar and the desktop right cluster both flip their surface
+ * tokens on scroll inversion. For the cluster this swaps both the label ink
+ * (--color-text-primary) and the scrim wash (--color-canvas) to the opposite
+ * theme, so it adapts to a contrasting section underneath.
+ * The desktop brand pill (#navbar) is intentionally excluded — it's a solid
+ * pill that's legible on any backdrop and should stay visually fixed as the
+ * page scrolls. */
+[data-theme="light"][data-nav-inverted="true"] #mobile-topbar,
+[data-theme="light"][data-nav-inverted="true"] #navbar-actions {
+  --color-canvas: var(--color-shade-2);
+  --color-canvas-elevated: var(--color-shade-3);
+  --color-text-primary: var(--color-shade-11);
+  --color-text-secondary: var(--color-shade-7);
+  --color-border-default: var(--color-shade-4);
+  --color-border-strong: var(--color-shade-5);
+}
+[data-theme="dark"][data-nav-inverted="true"] #mobile-topbar,
+[data-theme="dark"][data-nav-inverted="true"] #navbar-actions {
+  --color-canvas: var(--color-shade-10);
+  --color-canvas-elevated: var(--color-shade-11);
+  --color-text-primary: var(--color-shade-1);
+  --color-text-secondary: var(--color-shade-5);
+  --color-border-default: var(--color-shade-8);
+  --color-border-strong: var(--color-shade-7);
+}
+
+/* ─── Right nav cluster — feathered backdrop-blur scrim ───────────────
+ * The chips + theme toggle sit over .nav-actions-scrim, a soft local wash
+ * that blurs and lightly tints whatever scrolls beneath. Where the old
+ * mix-blend-difference layer could only fight a *background*, the scrim
+ * physically separates the labels from page *text* (hero copy, captions)
+ * that inversion would otherwise leave clashing glyph-on-glyph. Labels use
+ * the standard surface tokens, so they read primary ink over the wash and
+ * flip with the page via the data-nav-inverted overrides above. */
+#navbar-actions {
+  color: var(--color-text-primary);
+}
+/* Feathered so it dissolves into the page on its inner (left) and lower
+ * edges rather than reading as a hard pill; the chip row stays in the solid
+ * zone. Blur is capped low for Safari paint cost. The element opacity (set
+ * inline, eased on scroll) ramps the whole wash in from a light resting
+ * state. */
+.nav-actions-scrim {
+  background: color-mix(in oklab, var(--color-canvas) 55%, transparent);
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 26%),
+    linear-gradient(to top, transparent 0%, #000 32%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to right, transparent 0%, #000 26%),
+    linear-gradient(to top, transparent 0%, #000 32%);
+  mask-composite: intersect;
+}
+
+/* --- Override Tailwind built-in body sizes to px (fixed, don't scale with root) ---
+ * Tailwind v4 defaults use rem for text-xs through text-xl. Since we scale the root
+ * font-size on mobile (for heading scaling), we must pin body sizes to px so they
+ * stay constant. Only headings (h6–hero) should scale with rem. */
+:root {
+  --text-xs: 12px;
+  --text-xs--line-height: 1.5;
+  --text-sm: 14px;
+  --text-sm--line-height: 1.5;
+  --text-base: 16px;
+  --text-base--line-height: 1.5;
+  --text-lg: 18px;
+  --text-lg--line-height: 1.5;
+  --text-xl: 20px;
+  --text-xl--line-height: 1.5;
+}
+
+/* --- Legacy CSS variables (aliased to new shade scale for backward compat) --- */
+:root {
+  --shade-1: var(--color-shade-1);
+  --shade-2: var(--color-shade-3);
+  --shade-3: var(--color-shade-6);
+  --shade-4: var(--color-shade-9);
+  --shade-5: var(--color-shade-10);
+  --white: var(--color-surface-white);
+  --black: #000000;
+  --beige: var(--color-beige);
+  --stone: var(--color-stone);
+}
+
+/* --- shadcn primitive accent ---
+ * Our re-skinned shadcn controls (slider/switch/toggle-group) paint their
+ * active fill from `--ui-primary` instead of shadcn's undefined `--primary`.
+ * The default is the neutral primary ink, so a control dropped anywhere on the
+ * site reads on-brand; a surface that wants a colored accent (e.g. the
+ * /lissajous-explore playground) overrides `--ui-primary` on its own wrapper.
+ * Both follow the active theme because the source tokens flip with data-theme. */
+:root {
+  --ui-primary: var(--color-text-primary);
+  --ui-primary-fg: var(--color-canvas);
+}
+
+/* --- Base styles --- */
+@layer base {
+  html,
+  body {
+    padding: 0;
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    color: var(--color-text-primary);
+    background: var(--color-canvas);
+    scroll-behavior: smooth;
+    scroll-padding-top: 60px;
+    /* Never fake bold or italic — fail visibly, not silently. */
+    font-synthesis: none;
+  }
+
+  /* Reserve the scrollbar gutter permanently on the document scroll container.
+   * Locking scroll (intro curtain, nav sheets → `overflow: hidden` on <html>)
+   * no longer removes the scrollbar's width, so content never shifts when the
+   * lock toggles. The reserved strip is filled by the slim custom thumb below,
+   * so it reads as a deliberate element rather than empty native chrome. */
+  html {
+    scrollbar-gutter: stable;
+    /* Firefox: slim thumb, no track. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  /* WebKit/Blink: a floating pill thumb with a transparent track — the
+   * Radix/shadcn ScrollArea look, but native, so it works on the document
+   * scroller without a fixed-height viewport wrapper. The transparent border
+   * + padding-box clip insets the paint to ~4px, so the thumb floats slim
+   * inside the 11px gutter with breathing room on both sides. */
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 150ms ease;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+  /* Don't paint a button or corner box at the track ends. */
+  ::-webkit-scrollbar-button,
+  ::-webkit-scrollbar-corner {
+    display: none;
+  }
+
+  /* Scoped font-smoothing.
+   * `antialiased` (grayscale) makes text thinner and softer on 1x displays;
+   * `auto` (subpixel) is sharper. So we only force `antialiased` on the
+   * surfaces that need it: glass / backdrop-filter elements and their
+   * descendants, where subpixel rendering produces compositing artifacts. */
+  [class*="backdrop-blur"],
+  [class*="backdrop-blur"] * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+
+  /* Headings: font-family and weight from base, but NO font-size.
+   * Every heading must get its size from an explicit Tailwind class
+   * (text-h1, text-h2, text-h5, etc). This prevents hidden coupling
+   * between HTML element and visual size, and avoids conflicts with
+   * Tailwind v4 which can't compose arbitrary variants with custom
+   * utility classes. Unmigrated pages still get sizes from CSS Module
+   * scoped selectors (.sections h2 { font-size: 2rem }). */
+  /* h1–h5: Host Grotesk (display territory — personality reads at ≥30px).
+   * h6: Switzer (label/component territory — Host Grotesk adds no visible
+   * value at 24px and costs a second font render hit). Override per-surface
+   * with style={{ fontFamily: 'var(--font-heading)' }} when h6 needs HG. */
+  h1, h2, h3, h4, h5 {
+    font-family: var(--font-heading);
+  }
+  h6 {
+    font-family: var(--font-sans);
+  }
+  h1 { font-weight: var(--font-weight-h1); }
+  h2 { font-weight: var(--font-weight-h2); }
+  h3 { font-weight: var(--font-weight-h3); }
+  h4 { font-weight: var(--font-weight-h4); }
+  h5 { font-weight: var(--font-weight-h5); }
+  h6 { font-weight: var(--font-weight-h6); }
+
+  p {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 150%;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  .content {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding-top: 100px;
+    padding-bottom: 160px;
+  }
+
+  ul {
+    padding-left: 20px;
+  }
+
+  ol {
+    padding-left: 20px;
+  }
+
+  /* Plain anchors (not the .link-highlight inline variant, which owns its own
+   * timing) transition color + opacity in BOTH directions. Never `transition:
+   * all` — it animates layout/transform unintentionally; and scoping to :hover
+   * alone snaps on hover-out, so target the base state. */
+  a:not(.link-highlight) {
+    transition: color 0.2s ease-in-out, opacity 0.2s ease-in-out;
+  }
+
+  /* Inline-link highlight (the AnimatedLink `inline` variant).
+   *
+   * 4-direction spike. Cursor exit picks the closest of top / right /
+   * bottom / left, written as `data-exit` by AnimatedLink. The CSS rules
+   * below set both background-position AND the collapsed background-size
+   * axis to match — top/bottom retract vertically, left/right retract
+   * horizontally. Same aresluna-derived curve on all four directions.
+   *
+   * Timing ported from aresluna.org — the reference for this interaction.
+   * They use a separate absolutely-positioned `.hover-under` element with
+   * `transform: scaleY(0)` and `transform-origin: 50% 0px | 50% 100%` for
+   * the directional collapse, transitioning `transform 500ms cubic-bezier
+   * (1, -0.03, 0.02, 1.02)`. We get the same visual via background-size
+   * 100% → 0% with background-position pinned to the matching edge — same
+   * directional metaphor, and box-decoration-break: clone makes it work
+   * across line wraps (which their transform-based version can't do
+   * because pseudo-element positioning doesn't follow wrapped lines).
+   *
+   *  - Hover IN: 70ms quick fill. Snappy feedback, no snap.
+   *  - Hover OUT: 350ms with aresluna's curve — has subtle overshoot at
+   *    both ends (-0.03 and 1.02 y-values), giving the collapse a
+   *    weighted, slightly-elastic feel. Tightened from aresluna's 500ms
+   *    because their longer duration reads as luxurious on a slower,
+   *    text-heavy site; 350ms keeps the personality at portfolio pace.
+   *
+   * The enter and exit use different curves intentionally: enter uses a
+   * strong ease-out (the system answering), exit uses the aresluna curve
+   * (the deliberate, weighted retract). The asymmetry IS the personality.
+   *
+   * Color: shade-based, no accent. The highlight is one of the strongest
+   * text shades (text-primary), and the foreground flips to canvas so it
+   * reads against the dark block. Both flip with theme. */
+  .link-highlight {
+    background-image: linear-gradient(var(--color-text-primary), var(--color-text-primary));
+    background-repeat: no-repeat;
+    background-size: 100% 0%;
+    background-position: center bottom;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    padding: 0 0.15em;
+    margin: 0 -0.15em;
+    border-radius: 0.1em;
+    /* Exit: aresluna's curve, tightened to 350ms. background-position is
+     * deliberately NOT transitioned — it snaps to the new edge the
+     * moment data-exit changes so the collapse runs in the right
+     * direction from frame 1. Padding/margin ease with the fill so the
+     * hover halo breathes in and out without shifting sibling spacing
+     * (negative margin cancels the hover-only padding bump). */
+    transition: background-size 350ms cubic-bezier(1, -0.03, 0.02, 1.02),
+                color 350ms cubic-bezier(1, -0.03, 0.02, 1.02),
+                padding 350ms cubic-bezier(1, -0.03, 0.02, 1.02),
+                margin 350ms cubic-bezier(1, -0.03, 0.02, 1.02);
+  }
+  .link-highlight[data-exit="top"] {
+    background-size: 100% 0%;
+    background-position: center top;
+  }
+  .link-highlight[data-exit="bottom"] {
+    background-size: 100% 0%;
+    background-position: center bottom;
+  }
+  .link-highlight[data-exit="left"] {
+    background-size: 0% 100%;
+    background-position: left center;
+  }
+  .link-highlight[data-exit="right"] {
+    background-size: 0% 100%;
+    background-position: right center;
+  }
+  .group:hover .link-highlight,
+  .link-highlight:hover {
+    /* Short enter transition; the base rule above governs the longer
+     * exit transition once :hover ends. */
+    transition: background-size 70ms cubic-bezier(0.23, 1, 0.32, 1),
+                color 70ms cubic-bezier(0.23, 1, 0.32, 1),
+                padding 70ms cubic-bezier(0.23, 1, 0.32, 1),
+                margin 70ms cubic-bezier(0.23, 1, 0.32, 1);
+    background-size: 100% 100%;
+    /* Halo scales with link font-size (0.15em vert / 0.2em extra horiz ≈
+     * 3px / 4px at 20px). Negative margin mirrors padding so flex rows
+     * and inline copy don't reflow when the highlight appears. */
+    padding: 0.15em calc(0.15em + 0.2em);
+    margin: -0.15em calc(-0.15em - 0.2em);
+    /* !important required: AnimatedLink applies the resting color via a
+     * Tailwind arbitrary-value utility (text-[color:var(--color-link)]),
+     * which sits in @layer utilities and beats this rule's @layer base
+     * regardless of selector specificity. Without !important the hover
+     * fill grows but the text stays at its low-contrast resting tone. */
+    color: var(--color-canvas) !important;
+  }
+
+  /* Tighter halo for body-scale inline links (about colophon, captions).
+   * Same motion curves as .link-highlight — only the em padding nudges down. */
+  .link-highlight-compact {
+    padding: 0 0.11em;
+    margin: 0 -0.11em;
+    border-radius: 0.08em;
+  }
+  .group:hover .link-highlight-compact,
+  .link-highlight-compact:hover {
+    padding: 0.11em calc(0.11em + 0.14em);
+    margin: -0.11em calc(-0.11em - 0.14em);
+  }
+
+  .serif {
+    font-family: var(--font-serif);
+  }
+
+  /* Disable programming ligatures in non-code contexts.
+     JetBrains Mono ships ligatures on by default (=> becomes a fat arrow, !=
+     becomes ≠). Those belong in code editors, not in design-system captions,
+     filenames, or meta labels. Override per-usage for actual <pre>/<code> if ever needed. */
+  .font-mono {
+    font-feature-settings: "calt" off, "liga" off;
+  }
+
+  .primary600 {
+    font-weight: 600;
+    color: var(--color-accent);
+  }
+
+  .weight600 {
+    font-weight: 600;
+  }
+
+  .page {
+    /* Clip horizontal overflow (e.g. the footer's nowrap "Get in touch")
+     * without establishing a scroll container — `overflow: hidden` here would
+     * capture every descendant `position: sticky` (the section labels) and
+     * stop them pinning. `overflow-x: clip` clips without that side effect. */
+    overflow-x: clip;
+  }
+
+  /* Scale rem-based headings to 85% on mobile.
+   * Only headings (h6–hero) use rem and will scale down.
+   * Body text (xs–xl, cap-tag, caption) uses px and stays fixed.
+   * 16px × 0.85 = 13.6px root → hero 78px, h1 61px, h2 51px, h3 41px, etc. */
+  @media (max-width: 640px) {
+    html,
+    body {
+      font-size: 13.6px;
+    }
+  }
+
+}
+
+/*
+ * Explicit typography utility classes.
+ * SYNC: Each class here must mirror a --font-size-* token in the @theme extend
+ *       block above. Tailwind v4 JIT does not reliably auto-generate utilities
+ *       from custom font-size tokens in Next.js pages router, so we define them
+ *       manually. The @theme vars remain the single source of truth for values.
+ *
+ *       When adding a new font-size token:
+ *         1. Add --font-size-<name> (+ --line-height, etc.) in @theme extend
+ *         2. Add .text-<name> here referencing those vars
+ */
+@layer utilities {
+  /* Shadow-as-border. References the per-theme --shadow-border var (NOT a
+   * @theme token, which Tailwind would inline at the light value and never
+   * flip), so it adapts: layered black ring in light, single white ring in
+   * dark. Pair with `transition-[box-shadow]` for a smooth hover. */
+  .shadow-border {
+    box-shadow: var(--shadow-border);
+  }
+  .shadow-border-hover:hover {
+    box-shadow: var(--shadow-border-hover);
+  }
+  .text-hero {
+    font-size: var(--font-size-hero);
+    line-height: var(--font-size-hero--line-height);
+    letter-spacing: var(--font-size-hero--letter-spacing);
+  }
+  .text-h1 {
+    font-size: var(--font-size-h1);
+    line-height: var(--font-size-h1--line-height);
+    letter-spacing: var(--font-size-h1--letter-spacing);
+  }
+  .text-h2 {
+    font-size: var(--font-size-h2);
+    line-height: var(--font-size-h2--line-height);
+    letter-spacing: var(--font-size-h2--letter-spacing);
+  }
+  .text-h3 {
+    font-size: var(--font-size-h3);
+    line-height: var(--font-size-h3--line-height);
+    letter-spacing: var(--font-size-h3--letter-spacing);
+  }
+  .text-h4 {
+    font-size: var(--font-size-h4);
+    line-height: var(--font-size-h4--line-height);
+    letter-spacing: var(--font-size-h4--letter-spacing);
+  }
+  .text-h5 {
+    font-size: var(--font-size-h5);
+    line-height: var(--font-size-h5--line-height);
+    letter-spacing: var(--font-size-h5--letter-spacing);
+  }
+  .text-h6 {
+    font-size: var(--font-size-h6);
+    line-height: var(--font-size-h6--line-height);
+    letter-spacing: var(--font-size-h6--letter-spacing);
+  }
+  .text-hero:not(.font-mono):not(.font-serif):not(.font-sans),
+  .text-h1:not(.font-mono):not(.font-serif):not(.font-sans),
+  .text-h2:not(.font-mono):not(.font-serif):not(.font-sans),
+  .text-h3:not(.font-mono):not(.font-serif):not(.font-sans),
+  .text-h4:not(.font-mono):not(.font-serif):not(.font-sans),
+  .text-h5:not(.font-mono):not(.font-serif):not(.font-sans) {
+    font-family: var(--font-heading);
+  }
+  /* h6 utility: explicit Switzer — matches the h6 element rule above.
+   * Add `.font-heading` to force Host Grotesk on a specific .text-h6. */
+  .text-h6:not(.font-mono):not(.font-serif):not(.font-heading) {
+    font-family: var(--font-sans);
+  }
+  /* Heading-family toggles. Headings default by element (h1–h5 → Host
+   * Grotesk, h6 → Switzer) and by .text-h* size utility. Use these to
+   * override the family per use case — `font-heading` forces Host Grotesk,
+   * `font-sans` (built-in) forces Switzer. The rule of thumb: large display
+   * headings stay Grotesk; small subheaders/labels (≤20px that read as a
+   * label, not display type) take `font-sans`. Sits in @layer utilities so
+   * it beats the element base rule regardless of heading level. */
+  .font-heading {
+    font-family: var(--font-heading);
+  }
+  .text-cap-tag {
+    font-size: var(--font-size-cap-tag);
+    line-height: var(--font-size-cap-tag--line-height);
+    letter-spacing: var(--font-size-cap-tag--letter-spacing);
+    font-weight: 600;
+    font-feature-settings: "case" on;
+  }
+  .text-caption {
+    font-size: var(--font-size-caption);
+    line-height: var(--font-size-caption--line-height);
+  }
+}
+
+/* ─── Live-status nav chip ────────────────────────────────────────────
+ * The readout types in character-by-character (JS-driven, in LiveStatus.tsx);
+ * the chip is content-sized so it grows from just-the-dot as text lands.
+ * `.ls-colon`: the clock colon hard-blinks on/off like a real clock — a 2.12s
+ * cycle (1.06s lit / 1.06s dark), step-end so it jumps with no fade.
+ * Reduced motion: colon held steady (typing is skipped in the component). */
+@keyframes ls-colon {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.ls-colon {
+  animation: ls-colon 2.12s step-end infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ls-colon {
+    animation: none;
+  }
 }
