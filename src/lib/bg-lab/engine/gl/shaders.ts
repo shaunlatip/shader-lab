@@ -42,7 +42,17 @@ const col = (p: Record<string, ParamValue>, k: string, d: string): [number, numb
   const [r, g, b] = hexRGB(ps(p, k, d));
   return [r / 255, g / 255, b / 255];
 };
-const loc = (gl: WebGL2RenderingContext, prog: WebGLProgram, n: string) => gl.getUniformLocation(prog, n);
+// Per-program uniform-location cache (self-cleaning: WeakMap keyed off the program).
+// Caches null too — a missing uniform re-queries otherwise, once per pass per frame.
+const LOCS = new WeakMap<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
+const loc = (gl: WebGL2RenderingContext, prog: WebGLProgram, n: string) => {
+  let m = LOCS.get(prog);
+  if (!m) LOCS.set(prog, (m = new Map()));
+  if (m.has(n)) return m.get(n)!;
+  const l = gl.getUniformLocation(prog, n);
+  m.set(n, l);
+  return l;
+};
 
 // ---------------------------------------------------------------- grayscale
 const grayscale: GpuPass = {

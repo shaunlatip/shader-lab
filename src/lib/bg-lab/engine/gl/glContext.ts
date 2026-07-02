@@ -35,6 +35,8 @@ export class GLContext {
   private quadBuf: WebGLBuffer;
   private programs = new Map<string, WebGLProgram>();
   private copyProg: WebGLProgram;
+  /** Per-program uniform-location cache; null results are cached too (missing uniform). */
+  private locs = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
 
   constructor() {
     const canvas = document.createElement("canvas");
@@ -88,6 +90,16 @@ export class GLContext {
     return prog;
   }
 
+  /** Memoized gl.getUniformLocation, including null (missing uniform) results. */
+  loc(prog: WebGLProgram, name: string): WebGLUniformLocation | null {
+    let m = this.locs.get(prog);
+    if (!m) this.locs.set(prog, (m = new Map()));
+    if (m.has(name)) return m.get(name)!;
+    const l = this.gl.getUniformLocation(prog, name);
+    m.set(name, l);
+    return l;
+  }
+
   private shader(type: number, src: string): WebGLShader {
     const gl = this.gl;
     const sh = gl.createShader(type)!;
@@ -121,7 +133,18 @@ export class GLContext {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, target.tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    // Same-size uploads reuse the existing storage (texSubImage2D) instead of
+    // re-allocating it every call (texImage2D) — this runs per frame for video.
+    const dims = src as { width?: number; height?: number };
+    if (dims.width === target.w && dims.height === target.h) {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+      if (typeof dims.width === "number" && typeof dims.height === "number") {
+        target.w = dims.width;
+        target.h = dims.height;
+      }
+    }
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   }
 
@@ -142,7 +165,7 @@ export class GLContext {
     reads.forEach((r, i) => {
       gl.activeTexture(gl.TEXTURE0 + i);
       gl.bindTexture(gl.TEXTURE_2D, r.tex);
-      const loc = gl.getUniformLocation(prog, r.name);
+      const loc = this.loc(prog, r.name);
       if (loc) gl.uniform1i(loc, i);
     });
     setUniforms?.(gl, prog);
@@ -170,6 +193,7 @@ export class GLContext {
     const gl = this.gl;
     this.programs.forEach((p) => gl.deleteProgram(p));
     this.programs.clear();
+    this.locs.clear();
     gl.deleteVertexArray(this.quad);
     gl.deleteBuffer(this.quadBuf);
   }

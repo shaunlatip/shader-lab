@@ -72,6 +72,15 @@ Small, ordered, each independently shippable:
    pattern/static base to an offscreen bitmap keyed `(W,H,params)`; `drawImage` per frame. Matters
    once animated stacks run on the CPU engine. *(S–M)*
 
+## Known parity gap (found by the harness, 2026-07-02)
+
+`/dev/parity` on the haystack test image, 800×533: every bridged op and the ordered-dither GL pass
+are **pixel-identical** (0.00 max delta) — but **halftone GL vs CPU diverges** (max channel delta
+107/255, mean 12.7, 50.8% of pixels off by >1). Pre-existing, shader-level (nothing in the
+pipeline: bridged ops are 0.00). Prime suspect per roadmap §2: the GL pass samples the source
+through a `LINEAR`-filtered texture while the CPU op samples exact texels — plus possible AA/lattice
+edge differences. Fix alongside P1 work; acceptance = the harness reads ≤1 max delta.
+
 ## P1 — Bridge-killers: GL passes for the heavy bridged ops
 
 Current CPU-only (bridged) ops: blur, bloom, grain, gradientMap, braille, mosaic, lego, lineArt,
