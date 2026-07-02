@@ -35,6 +35,15 @@ export function Stage() {
   const engineRef = useRef<RenderEngine | null>(null);
   const rafRef = useRef(0);
   const ensureEngine = (): RenderEngine => (engineRef.current ??= createEngine(preferredEngineId()));
+  // Set when a render() throw demoted us to the CPU engine, so the next natural
+  // retry point (a new engineSource) can rebuild the preferred engine instead of
+  // being stuck on CPU for the rest of the session.
+  const demotedRef = useRef(false);
+  const lastSourceRef = useRef(engineSource);
+  // Animated effects (grain/glitch `animate`) recreate this effect on every
+  // config change; hoisting the clock to a ref keeps it running across those
+  // re-runs instead of resetting to t=0 whenever a slider drags.
+  const t0Ref = useRef<number | null>(null);
 
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [dims, setDims] = useState<Dims>({ W: 1, H: 1 });
@@ -92,15 +101,32 @@ export function Stage() {
     const animated =
       isVideo || (!showOriginal && config.stack.some((e) => e.enabled && e.params?.animate === true));
 
+    // engineSource changing is the natural retry point for a prior GL demotion:
+    // a new source means a fresh render anyway, so rebuild the preferred engine
+    // instead of staying stuck on CPU for the rest of the session. Config/dims/
+    // showOriginal changes must NOT trigger this — only compare engineSource.
+    if (demotedRef.current && lastSourceRef.current !== engineSource) {
+      try {
+        engineRef.current?.dispose();
+      } catch {
+        /* ignore */
+      }
+      engineRef.current = null;
+      demotedRef.current = false;
+    }
+    lastSourceRef.current = engineSource;
+
     ensureEngine().setSource(engineSource);
     cancelAnimationFrame(rafRef.current);
 
     // A bad GL frame (context loss, driver quirk) shouldn't freeze the preview —
-    // drop to the CPU engine once and re-render.
+    // drop to the CPU engine once and re-render. Observable so a broken shader
+    // doesn't go unnoticed (see selfCheck in GLEngine for the dev-time check).
     const renderFrame = (time?: number) => {
       try {
         ensureEngine().render(canvas, cfg, dims, time);
-      } catch {
+      } catch (err) {
+        console.warn("[bg-lab] GL render failed — falling back to CPU engine:", err);
         try {
           engineRef.current?.dispose();
         } catch {
@@ -108,6 +134,9 @@ export function Stage() {
         }
         const cpuEngine = createEngine("cpu");
         engineRef.current = cpuEngine;
+        // Only mark for retry if we actually demoted away from a GL preference —
+        // if "cpu" was already preferred, there's nothing to recover to.
+        if (preferredEngineId() !== "cpu") demotedRef.current = true;
         cpuEngine.setSource(engineSource);
         cpuEngine.render(canvas, cfg, dims, time);
       }
@@ -119,7 +148,8 @@ export function Stage() {
     }
 
     let stopped = false;
-    const t0 = performance.now();
+    t0Ref.current ??= performance.now();
+    const t0 = t0Ref.current;
     const loop = () => {
       if (stopped) return;
       renderFrame((performance.now() - t0) / 1000);

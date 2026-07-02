@@ -47,6 +47,20 @@ export class GLEngine implements RenderEngine {
 
   constructor() {
     this.glc = new GLContext();
+    if (process.env.NODE_ENV !== "production") this.selfCheck();
+  }
+
+  /** Dev-only: compile every GL_OPS pass so a broken shader logs loudly instead
+   * of silently bridging/falling back at render time. Also pre-warms the
+   * program cache. One failure must not stop the rest from being checked. */
+  private selfCheck() {
+    for (const [type, pass] of Object.entries(GL_OPS)) {
+      try {
+        this.glc.program(pass!.frag);
+      } catch (err) {
+        console.error(`[bg-lab] GL pass '${type}' failed to compile:`, err);
+      }
+    }
   }
 
   setSource(src: EngineSource) {
@@ -150,7 +164,7 @@ export class GLEngine implements RenderEngine {
       const pass = GL_OPS[eff.type]!;
       const prog = this.glc.program(pass.frag);
       this.glc.pass(prog, other, [{ name: "u_tex", tex: cur.tex }], (g, pr) => {
-        setCommon(g, pr, W, H, u, t);
+        setCommon(this.glc, g, pr, W, H, u, t);
         pass.setUniforms(g, pr, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
       });
       const tmp = cur;
@@ -160,8 +174,10 @@ export class GLEngine implements RenderEngine {
 
     // --- present + copy to the (2D) target canvas
     this.glc.present(cur);
-    target.width = W;
-    target.height = H;
+    // Guard against implicit canvas reset on same-value width/height reassignment (HTML spec).
+    // Safe here: the explicit clearRect + full-canvas drawImage below cover it.
+    if (target.width !== W) target.width = W;
+    if (target.height !== H) target.height = H;
     const tctx = ctx2d(target);
     tctx.clearRect(0, 0, W, H);
     tctx.drawImage(this.glc.canvas, 0, 0);
@@ -180,12 +196,13 @@ export class GLEngine implements RenderEngine {
   }
 }
 
-function setCommon(gl: WebGL2RenderingContext, prog: WebGLProgram, W: number, H: number, u: number, t: number) {
-  const set = (n: string, fn: () => void) => {
-    if (gl.getUniformLocation(prog, n)) fn();
-  };
-  set("u_texel", () => gl.uniform2f(gl.getUniformLocation(prog, "u_texel"), 1 / W, 1 / H));
-  set("u_dims", () => gl.uniform2f(gl.getUniformLocation(prog, "u_dims"), W, H));
-  set("u_unit", () => gl.uniform1f(gl.getUniformLocation(prog, "u_unit"), u));
-  set("u_time", () => gl.uniform1f(gl.getUniformLocation(prog, "u_time"), t));
+function setCommon(glc: GLContext, gl: WebGL2RenderingContext, prog: WebGLProgram, W: number, H: number, u: number, t: number) {
+  const l1 = glc.loc(prog, "u_texel");
+  if (l1) gl.uniform2f(l1, 1 / W, 1 / H);
+  const l2 = glc.loc(prog, "u_dims");
+  if (l2) gl.uniform2f(l2, W, H);
+  const l3 = glc.loc(prog, "u_unit");
+  if (l3) gl.uniform1f(l3, u);
+  const l4 = glc.loc(prog, "u_time");
+  if (l4) gl.uniform1f(l4, t);
 }
