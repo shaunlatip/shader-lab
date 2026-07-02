@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Shader Lab
 
-## Getting Started
+A studio for layered image & video effects — pixelate, dither, halftone, ASCII,
+line art, Kuwahara, dispersion, gradient maps, grain and more. Stack, reorder,
+and export to PNG / GIF / MP4. Runs on a WebGL engine with a CPU fallback
+(`?engine=cpu`), so preview matches export.
 
-First, run the development server:
+Extracted from the [portfolio](https://github.com/shaunlatip) "Effects Lab"
+into its own app.
+
+## Develop
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Pinned to `pnpm@10.15.0` (the bundled corepack crashes on pnpm 11).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Pexels search (optional)
 
-## Learn More
+Image/video search is powered by [Pexels](https://www.pexels.com/api/). Set a
+free API key so the source picker can search; without it, the picker degrades to
+upload + the bundled gallery.
 
-To learn more about Next.js, take a look at the following resources:
+- Local: copy `.env.example` → `.env.local` and set `PEXELS_API_KEY`.
+- Production (Vercel): set `PEXELS_API_KEY` in Project → Settings → Environment
+  Variables (Production + Preview), server-side (not `NEXT_PUBLIC_`). The
+  `/api/pexels` route proxies with it, so search works for everyone.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Next.js (App Router) · React · Tailwind v4 · WebGL2 + Canvas 2D · WebCodecs /
+`mp4-muxer` (MP4) · `gifenc` (GIF). Deployed on Vercel.
 
-## Deploy on Vercel
+## Architecture
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/lib/bg-lab/` — the engine. Two implementations behind one contract
+  (`engine/types.ts`): a CPU engine (`engine/cpu/`) and a WebGL engine
+  (`engine/gl/`). Effects are CPU ops that auto-bridge in GL, so preview == export.
+  The catalog (`catalog.ts`) drives available effects and their controls.
+- `src/components/bg-lab/` — the editor UI (source picker, effect stack, export).
+- `src/app/` — the Next.js App Router surface: the page, the client wrapper
+  (`ShaderLab.tsx`, `ssr: false` because the editor touches canvas/WebGL), and
+  the Pexels proxy route.

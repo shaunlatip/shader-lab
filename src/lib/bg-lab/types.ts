@@ -1,0 +1,114 @@
+// BG Lab — core data model. This is the single source of truth for the editor
+// state AND the copy-paste "AI config" JSON shape (a pasted BgConfig round-trips
+// to identity), so keep it serialization-clean (no functions, no class instances).
+
+export interface GradientStop {
+  /** position along luminance 0..1 */
+  t: number;
+  /** #rrggbb */
+  color: string;
+}
+
+export type ParamValue = number | string | boolean | GradientStop[];
+
+export type EffectType =
+  | "adjust"
+  | "blur"
+  | "pixelate"
+  | "posterize"
+  | "dither"
+  | "halftone"
+  | "gradientMap"
+  | "threshold"
+  | "grayscale"
+  | "grain"
+  | "tint"
+  | "chromatic"
+  | "scanlines"
+  | "vignette"
+  | "bloom"
+  | "sharpen"
+  | "displace"
+  // converters / styles
+  | "ascii"
+  | "blockChars"
+  | "crosshatch"
+  | "diagonal"
+  | "diamond"
+  | "lines"
+  | "mixed"
+  | "glyphDots"
+  | "braille"
+  | "mosaic"
+  | "lego"
+  // post parity (Phase 4)
+  | "crtCurvature"
+  | "glitch"
+  | "filmDust"
+  | "characterBloom"
+  // converters (Phase 5)
+  | "lineArt"
+  | "kuwahara";
+
+export interface Effect {
+  /** stable nanoid — drives dnd + React keys, never the array index */
+  id: string;
+  /** null = blank row from "Add", awaiting a combobox pick; render skips it */
+  type: EffectType | null;
+  enabled: boolean;
+  params: Record<string, ParamValue>;
+}
+
+export type AspectId = "3:2" | "4:3" | "16:9" | "21:9" | "1:1" | "2:3" | "9:16";
+
+/** Source crop/rotate, applied in the engine base draw (before the stack).
+ * `crop` is normalized 0..1 in the rotated source's space. */
+export interface SourceTransform {
+  rotate?: 0 | 90 | 180 | 270;
+  flipH?: boolean;
+  crop?: { x: number; y: number; w: number; h: number };
+}
+
+export type PatternType = "dotGrid" | "lineGrid" | "checker" | "stripes" | "rings" | "iso";
+
+export interface PatternState {
+  type: PatternType;
+  cell: number;
+  weight: number;
+  jitter: number;
+  angle: number;
+  stagger: boolean;
+  fg: string;
+  bg: string;
+}
+
+export interface SourceState {
+  mode: "image" | "video" | "solid" | "pattern";
+  /** gallery id | "upload" | `pexels:<url>` | `pexels:video:<url>` | blob/data URL | null */
+  imageId: string | null;
+  /** #rrggbb */
+  solidColor: string;
+  /** optional crop + rotate applied to the source */
+  transform?: SourceTransform;
+  /** pattern generator state — only used when mode === "pattern" */
+  pattern?: PatternState;
+}
+
+export interface OutputState {
+  aspect: AspectId | { w: number; h: number };
+  /** long-edge px for export */
+  longEdge: number;
+}
+
+export interface BgConfig {
+  version: 1;
+  output: OutputState;
+  source: SourceState;
+  /** ORDER IS SEMANTIC — the render loop walks this array top → bottom */
+  stack: Effect[];
+}
+
+export interface Dims {
+  W: number;
+  H: number;
+}
