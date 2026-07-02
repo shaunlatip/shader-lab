@@ -1,4 +1,9 @@
-# Shader Lab — migration plan
+# Shader Lab — migration plan (EXECUTED 2026-07-01/02 — kept as history)
+
+> Done: migration merged via PR #1, fonts fixed via PR #2, live at
+> https://shader-lab-smoky.vercel.app/, portfolio strip in portfolio PR #37. For current/forward
+> work see `docs/engine-performance-plan.md`; for the engine spec see `docs/effects-lab-handoff.md`
+> + `docs/effects-lab-shader-roadmap.md`.
 
 Move the portfolio's **Effects Lab** (a WebGL/CPU image + video effects studio, internally
 codenamed `bg-lab`) into this standalone **`shader-lab`** repo, rename it user-facing to

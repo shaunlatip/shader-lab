@@ -467,32 +467,44 @@ export const kuwahara: Op = (canvas, p, u) => {
     const SECTORS = 8;
     const sectorAngle = TWO_PI / SECTORS;
 
+    // The disc test + atan2 sector index depend only on (dx,dy) — identical for
+    // every pixel. Precompute the offset list once (same dy-outer/dx-inner order
+    // as the original loop, so accumulation order — and float results — match).
+    const offs: number[] = [];
+    for (let dy = -R; dy <= R; dy++)
+      for (let dx = -R; dx <= R; dx++) {
+        if (dx * dx + dy * dy > R * R) continue;
+        let ang = Math.atan2(dy, dx);
+        if (ang < 0) ang += TWO_PI;
+        offs.push(dx, dy, Math.min(SECTORS - 1, Math.floor(ang / sectorAngle)));
+      }
+    const offN = offs.length;
+
+    // Per-sector accumulators, hoisted out of the pixel loop (allocating these
+    // per pixel was ~14M Float32Array constructions per 1080p frame).
+    const sr  = new Float32Array(SECTORS);
+    const sg  = new Float32Array(SECTORS);
+    const sb  = new Float32Array(SECTORS);
+    const sr2 = new Float32Array(SECTORS);
+    const sg2 = new Float32Array(SECTORS);
+    const sb2 = new Float32Array(SECTORS);
+    const sn  = new Float32Array(SECTORS);
+
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        // accumulate per-sector sums; layout: [sr, sg, sb, sr2, sg2, sb2, n] × 8
-        const sr  = new Float32Array(SECTORS);
-        const sg  = new Float32Array(SECTORS);
-        const sb  = new Float32Array(SECTORS);
-        const sr2 = new Float32Array(SECTORS);
-        const sg2 = new Float32Array(SECTORS);
-        const sb2 = new Float32Array(SECTORS);
-        const sn  = new Float32Array(SECTORS);
+        sr.fill(0); sg.fill(0); sb.fill(0);
+        sr2.fill(0); sg2.fill(0); sb2.fill(0);
+        sn.fill(0);
 
-        for (let dy = -R; dy <= R; dy++) {
-          const py = clamp(y + dy, 0, H - 1);
-          for (let dx = -R; dx <= R; dx++) {
-            if (dx * dx + dy * dy > R * R) continue;
-            const px = clamp(x + dx, 0, W - 1);
-            const i = (py * W + px) * 4;
-            const r = src[i], g = src[i + 1], b = src[i + 2];
-            // angle in [0, 2π); sector index
-            let ang = Math.atan2(dy, dx);
-            if (ang < 0) ang += TWO_PI;
-            const k = Math.min(SECTORS - 1, Math.floor(ang / sectorAngle));
-            sr[k]  += r;  sg[k]  += g;  sb[k]  += b;
-            sr2[k] += r * r; sg2[k] += g * g; sb2[k] += b * b;
-            sn[k]  += 1;
-          }
+        for (let o = 0; o < offN; o += 3) {
+          const px = clamp(x + offs[o], 0, W - 1);
+          const py = clamp(y + offs[o + 1], 0, H - 1);
+          const k = offs[o + 2];
+          const i = (py * W + px) * 4;
+          const r = src[i], g = src[i + 1], b = src[i + 2];
+          sr[k]  += r;  sg[k]  += g;  sb[k]  += b;
+          sr2[k] += r * r; sg2[k] += g * g; sb2[k] += b * b;
+          sn[k]  += 1;
         }
 
         let bestVar = Infinity;

@@ -156,6 +156,11 @@ export class GLContext {
     this.pass(this.copyProg, null, [{ name: "u_tex", tex: src.tex }], undefined, { w: src.w, h: src.h });
   }
 
+  /** Blit one texture into another (same-size GPU copy; no CPU involvement). */
+  copy(src: GLTexture, dst: GLTexture) {
+    this.pass(this.copyProg, dst, [{ name: "u_tex", tex: src.tex }]);
+  }
+
   resize(w: number, h: number) {
     if (this.canvas.width !== w) this.canvas.width = w;
     if (this.canvas.height !== h) this.canvas.height = h;

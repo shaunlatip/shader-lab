@@ -228,8 +228,9 @@ void main(){ vec2 px=v_uv*u_dims; vec2 cell=(floor(px/u_block)+0.5)*u_block; o=t
 // ---------------------------------------------------------------- ordered dither (diffusion modes bridge to CPU)
 const dither: GpuPass = {
   frag: f(`uniform float u_levels; uniform float u_scale; uniform float u_mono; uniform int u_type; uniform float u_pixelate;
-vec3 toLin(vec3 s){ return pow(max(s,vec3(0.0)),vec3(2.2)); }
-vec3 toSRGB(vec3 l){ return pow(max(l,vec3(0.0)),vec3(1.0/2.2)); }
+// toLin/toSRGB come from the F2 HEADER prelude — redeclaring them here was a
+// GLSL redefinition error: the pass failed to compile and Stage's fallback
+// silently demoted the whole session to the CPU engine.
 float bayer2(ivec2 p){ int v=(p.y%2)*2+(p.x%2); float t[4]=float[4](0.0,2.0,3.0,1.0); return (t[v]+0.5)/4.0; }
 float bayer4(ivec2 p){ int x=p.x%4,y=p.y%4; float m[16]=float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.); return (m[y*4+x]+0.5)/16.0; }
 float bayer8(ivec2 p){ int x=p.x%8,y=p.y%8; float m[64]=float[64](
@@ -281,7 +282,9 @@ void main(){
   vec3 lin=toLin(c.rgb);
   vec3 rgb;
   if(u_mono>0.5){ float v=luma601(lin); v=clamp(floor(v*(L-1.0)+m+0.5),0.0,L-1.0)/(L-1.0); rgb=toSRGB(vec3(v)); }
-  else { rgb=toSRGB(clamp(floor(lin*(L-1.0)+m+0.5),0.0,vec3(L-1.0))/(L-1.0)); }
+  // clamp needs matching min/max types: (vec3, float, vec3) is an invalid GLSL
+  // overload and made this pass fail to compile (→ silent CPU demotion).
+  else { rgb=toSRGB(clamp(floor(lin*(L-1.0)+m+0.5),vec3(0.0),vec3(L-1.0))/(L-1.0)); }
   o=vec4(rgb,c.a); }`),
   setUniforms: (gl, prog, p, u) => {
     const types: Record<string, number> = { bayer2: 0, bayer4: 1, bayer8: 2, blueNoise: 3, stripes: 4, crossStripe: 5 };
