@@ -1090,3 +1090,18 @@ html:has(#intro-root[data-phase="reveal"]) {
     animation: none;
   }
 }
+
+/* Shader Lab font fix. The @theme font tokens ported from the portfolio point at
+   local fonts (Switzer, Inter, Host Grotesk, Lora) that this app doesn't load,
+   and e.g. `--font-sans: var(--font-switzer), ...` has no fallback — so it's
+   "guaranteed-invalid" in production and body text drops to the UA serif.
+   Redefine the tokens on <body>, where next/font's --font-work-sans / --font-archivo
+   / --font-geist-mono are actually set, against the fonts layout.tsx loads. */
+body {
+  --font-sans: var(--font-work-sans), system-ui, sans-serif;
+  --font-lab: var(--font-work-sans), system-ui, sans-serif;
+  --font-heading: var(--font-archivo), system-ui, sans-serif;
+  --font-nagel: var(--font-archivo), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  --font-serif: Georgia, "Times New Roman", serif;
+}
