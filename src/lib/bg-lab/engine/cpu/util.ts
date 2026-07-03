@@ -1,6 +1,7 @@
 // BG Lab — shared CPU helpers (math, canvas temps, dither matrices).
 
 import type { GradientStop, ParamValue } from "../../types";
+import { BLUE_NOISE_128 } from "../bluenoise";
 
 export const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -100,8 +101,9 @@ export function orderedThreshold(type: string, x: number, y: number): number {
   if (type === "stripes") return (STRIPE8[(y & 7) * 8 + (x & 7)] + 0.5) / 64;
   if (type === "crossStripe") return (CROSS_STRIPE8[(y & 7) * 8 + (x & 7)] + 0.5) / 64;
   if (type === "blueNoise") {
-    // Interleaved Gradient Noise (Jimenez) — a cheap blue-noise-like threshold
-    return (52.9829189 * ((0.06711056 * x + 0.00583715 * y) % 1)) % 1;
+    // Real 128^2 void-and-cluster matrix (F8) — replaced the IGN approximation.
+    // Same bytes as the GL pass's u_bn texture (see bluenoise.ts): exact parity.
+    return (BLUE_NOISE_128[(y & 127) * 128 + (x & 127)] + 0.5) / 256;
   }
   return (B4[(y & 3) * 4 + (x & 3)] + 0.5) / 16; // bayer4 default
 }

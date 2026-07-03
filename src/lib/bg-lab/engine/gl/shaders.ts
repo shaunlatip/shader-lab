@@ -8,8 +8,14 @@
 import type { EffectType, ParamValue } from "../../types";
 import { hexRGB, pb, pn, ps, pstops } from "../cpu/util";
 
+/** F4: named asset textures a pass can sample (bound after u_tex, in order).
+ * Keys resolve via glEngine's asset cache — sampler-only textures (no FBO). */
+export type AssetTexKey = "blueNoise128";
+
 export interface GpuPass {
   frag: string;
+  /** Extra sampler bindings: uniform `name` reads asset `key`. */
+  samplers?: { name: string; key: AssetTexKey }[];
   setUniforms: (gl: WebGL2RenderingContext, prog: WebGLProgram, p: Record<string, ParamValue>, u: number, t: number, dims: { w: number; h: number }) => void;
 }
 
@@ -238,7 +244,9 @@ void main(){ vec2 px=v_uv*u_dims; vec2 cell=(floor(px/u_block)+0.5)*u_block; o=t
 
 // ---------------------------------------------------------------- ordered dither (diffusion modes bridge to CPU)
 const dither: GpuPass = {
+  samplers: [{ name: "u_bn", key: "blueNoise128" }],
   frag: f(`uniform float u_levels; uniform float u_scale; uniform float u_mono; uniform int u_type; uniform float u_pixelate;
+uniform sampler2D u_bn; // 128^2 blue-noise bytes (F8), same array as the CPU op
 // toLin/toSRGB come from the F2 HEADER prelude — redeclaring them here was a
 // GLSL redefinition error: the pass failed to compile and Stage's fallback
 // silently demoted the whole session to the CPU engine.
@@ -250,7 +258,13 @@ float bayer8(ivec2 p){ int x=p.x%8,y=p.y%8; float m[64]=float[64](
  3.,35.,11.,43.,1.,33.,9.,41.,51.,19.,59.,27.,49.,17.,57.,25.,
  15.,47.,7.,39.,13.,45.,5.,37.,63.,31.,55.,23.,61.,29.,53.,21.);
  return (m[y*8+x]+0.5)/64.0; }
-float ign(vec2 p){ return fract(52.9829189*fract(0.06711056*p.x+0.00583715*p.y)); }
+// blueNoise threshold: real void-and-cluster matrix via u_bn texelFetch —
+// snap the R8 read back to the exact byte so it thresholds identically to
+// the CPU's (v + 0.5)/256 (replaced the old IGN approximation, F8).
+float bnoise(ivec2 cell){
+  float v = floor(texelFetch(u_bn, ivec2(cell.x & 127, cell.y & 127), 0).r*255.0 + 0.5);
+  return (v + 0.5)/256.0;
+}
 // Stylized 8x8 matrices (Heckel §C4): stripe + cross-stripe
 float stripe8(ivec2 p){ int x=p.x%8,y=p.y%8; float m[64]=float[64](
  0.,8.,16.,24.,32.,40.,48.,56.,
@@ -283,7 +297,7 @@ void main(){
   float m;
   if(u_type==0)      m=bayer2(cell);
   else if(u_type==2) m=bayer8(cell);
-  else if(u_type==3) m=ign(floor(px/u_scale));
+  else if(u_type==3) m=bnoise(cell);
   else if(u_type==4) m=stripe8(cell);
   else if(u_type==5) m=crossStripe8(cell);
   else               m=bayer4(cell);

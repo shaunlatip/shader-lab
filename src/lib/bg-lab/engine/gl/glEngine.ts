@@ -16,7 +16,8 @@ import { drawTransformedSource } from "../cpu/sourceTransform";
 import { drawPattern } from "../cpu/patterns";
 import { OPS } from "../cpu/ops";
 import { GLContext, type GLTexture } from "./glContext";
-import { GL_OPS } from "./shaders";
+import { GL_OPS, type AssetTexKey } from "./shaders";
+import { BLUE_NOISE_128, BLUE_NOISE_SIZE } from "../bluenoise";
 
 const DEFAULT_BG = "#cdd9e0";
 
@@ -46,6 +47,8 @@ export class GLEngine implements RenderEngine {
   private base: HTMLCanvasElement | null = null;
   private bridge: HTMLCanvasElement | null = null;
   private t0 = 0;
+  /** F4 asset-texture cache: sampler-only textures for GpuPass.samplers. */
+  private assets = new Map<AssetTexKey, WebGLTexture>();
 
   constructor() {
     this.glc = new GLContext();
@@ -165,7 +168,9 @@ export class GLEngine implements RenderEngine {
       }
       const pass = GL_OPS[eff.type]!;
       const prog = this.glc.program(pass.frag);
-      this.glc.pass(prog, other, [{ name: "u_tex", tex: cur.tex }], (g, pr) => {
+      const reads = [{ name: "u_tex", tex: cur.tex }];
+      if (pass.samplers) for (const s of pass.samplers) reads.push({ name: s.name, tex: this.assetTex(s.key) });
+      this.glc.pass(prog, other, reads, (g, pr) => {
         setCommon(this.glc, g, pr, W, H, u, t);
         pass.setUniforms(g, pr, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
       });
@@ -185,8 +190,21 @@ export class GLEngine implements RenderEngine {
     tctx.drawImage(this.glc.canvas, 0, 0);
   }
 
+  /** Lazily build + cache an F4 asset texture. Keys are compile-time enumerable
+   * (AssetTexKey), so an unknown key is a type error, not a runtime miss. */
+  private assetTex(key: AssetTexKey): WebGLTexture {
+    const hit = this.assets.get(key);
+    if (hit) return hit;
+    // single case for now; extend per key as F4 consumers land (ASCII atlas…)
+    const tex = this.glc.createAssetTextureR8(BLUE_NOISE_SIZE, BLUE_NOISE_SIZE, BLUE_NOISE_128);
+    this.assets.set(key, tex);
+    return tex;
+  }
+
   dispose() {
     const gl = this.glc.gl;
+    this.assets.forEach((t) => gl.deleteTexture(t));
+    this.assets.clear();
     if (this.a) gl.deleteTexture(this.a.tex), gl.deleteFramebuffer(this.a.fbo);
     if (this.b) gl.deleteTexture(this.b.tex), gl.deleteFramebuffer(this.b.fbo);
     if (this.baseTex) gl.deleteTexture(this.baseTex.tex), gl.deleteFramebuffer(this.baseTex.fbo);

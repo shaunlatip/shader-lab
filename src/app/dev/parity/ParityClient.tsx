@@ -41,6 +41,10 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "dither", params: { type: "bayer4" } }],
   },
   {
+    label: "Dither · blue noise",
+    stack: [{ type: "dither", params: { type: "blueNoise" } }],
+  },
+  {
     label: "Dither · Floyd-Steinberg",
     stack: [{ type: "dither", params: { type: "floydSteinberg" } }],
   },

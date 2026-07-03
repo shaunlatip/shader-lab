@@ -128,6 +128,23 @@ export class GLContext {
     return { tex, fbo, w, h };
   }
 
+  /** F4: sampler-only asset texture (no FBO) from raw single-channel bytes —
+   * NEAREST/REPEAT, read with texelFetch in passes. Used for threshold
+   * matrices / atlases that shaders sample but never render into. */
+  createAssetTextureR8(w: number, h: number, data: Uint8Array): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, w, h, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    return tex;
+  }
+
   /** Upload an external source (image/video/canvas) into a texture, FLIP_Y so it's upright. */
   uploadExternal(target: GLTexture, src: TexImageSource) {
     const gl = this.gl;
