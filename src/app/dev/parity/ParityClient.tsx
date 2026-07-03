@@ -37,6 +37,10 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "halftone", params: { dotShape: "square", stagger: true, angle: 22, contrast: 1.3 } }],
   },
   {
+    label: "Halftone · gooey+overflow",
+    stack: [{ type: "halftone", params: { gooey: 0.8, overflow: 0.5 } }],
+  },
+  {
     label: "Dither · Bayer 4x4",
     stack: [{ type: "dither", params: { type: "bayer4" } }],
   },

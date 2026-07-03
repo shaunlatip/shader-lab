@@ -638,12 +638,18 @@ const displace: Op = (canvas, p, u) => {
 //             A = -diag/2 + cell/2, diag = ceil(hypot(W,H)) (legacy CPU phase)
 //   sampling  source read at the cell-centre texel: clamp(floor(Pc+0.5)),
 //             NEAREST, coverage in PERCEPTUAL sRGB luma601 (not linear)
-//   radius    r = sqrt(cov^contrast)*0.71 in cell units; skip if r*cell<=0.2
-//   AA        aaCov(dPx) = clamp(0.5 - dPx, 0..1) — 1px linear area ramp on
-//             the SDF in px units (deterministic; replaces fwidth/canvas AA)
-//   union     mono: max over the pixel's 3x3 cell neighbourhood;
-//             CMYK: multiply mix(1, ink, aa) per neighbour dot per screen,
-//             quantized ONCE at the end (matches GL float compositing)
+//   radius    r = sqrt(cov^contrast)*0.71*(1 + overflow*0.9) in cell units;
+//             skip if r*cell<=0.2. overflow<=1 keeps r+smin growth < 1.5, the
+//             3x3 neighbourhood's coverage bound — do not raise the cap.
+//   union     fold the SDFs over the pixel's 3x3 cell neighbourhood — hard
+//             min, or iq smin (k = gooey*0.4 cell units) when gooey>0 — then
+//             ONE aaCov(dPx) = clamp(0.5 - dPx, 0..1), a 1px linear area
+//             ramp in px units. (Hard-min fold == the old per-dot coverage
+//             max: aaCov is monotonic in d.)
+//   CMYK      legacy (overflow=gooey=0): multiply mix(1, ink, aa) per
+//             neighbour DOT per screen; with overflow/gooey: fold per SCREEN
+//             then multiply once (merged dots must not double-ink).
+//             Quantized ONCE at the end (matches GL float compositing).
 
 // SDF in cell units; shape: 0 circle 1 ring 2 line 3 square 4 diamond
 const HT_SHAPES = ["circle", "ring", "line", "square", "diamond"];
@@ -675,6 +681,7 @@ function buildHtScreen(
   angleDeg: number,
   contrast: number,
   stagger: boolean,
+  overflow: number, // 0..1 — dot radius scale (1 + overflow*0.9)
   cov: (i: number) => number, // 0..1 coverage (invert applied) at src byte index
 ): HtScreen {
   const ang = (angleDeg * Math.PI) / 180;
@@ -684,6 +691,7 @@ function buildHtScreen(
   const A = -diag / 2 + cell / 2;
   const kmax = Math.ceil(diag / cell);
   const kw = kmax + 3; // k in [-1, kmax+1]
+  const rScale = 0.71 * (1 + overflow * 0.9);
   const grid = new Float64Array(kw * kw).fill(-1);
   for (let ky = -1; ky <= kmax + 1; ky++) {
     // GLSL mod(): result is non-negative for negative ky
@@ -696,16 +704,74 @@ function buildHtScreen(
       const ix = clamp(Math.floor(Pcx + 0.5), 0, W - 1);
       const iy = clamp(Math.floor(Pcy + 0.5), 0, H - 1);
       const c = Math.pow(clamp(cov((iy * W + ix) * 4), 0, 1), contrast);
-      const r = Math.sqrt(c) * 0.71;
+      const r = Math.sqrt(c) * rScale;
       grid[(ky + 1) * kw + (kx + 1)] = r * cell <= 0.2 ? -1 : r;
     }
   }
   return { cs, sn, A, kmax, kw, grid };
 }
 
-// Accumulate one screen over every pixel. blend receives (pixelIndex, aa,
-// dotSerial) for each contributing neighbour dot.
+// iq polynomial smooth-min — the gooey dot merge (k in cell units, k>0).
+function smin(a: number, b: number, k: number): number {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.min(a, b) - h * h * k * 0.25;
+}
+
+// Fold one screen's SDFs over every pixel's 3x3 neighbourhood and emit ONE
+// combined coverage per pixel (hard min, or smin when gooeyK>0). The GL
+// shader folds the identical dot set — the fold must include every
+// non-skipped dot (no early aa reject: distant dots still pull an smin).
 function runHtScreen(
+  W: number,
+  H: number,
+  cell: number,
+  stagger: boolean,
+  shape: number,
+  gooeyK: number, // smin k in cell units; 0 = hard min
+  s: HtScreen,
+  blend: (px: number, aa: number) => void,
+) {
+  const { cs, sn, A, kmax, kw, grid } = s;
+  const halfW = W / 2,
+    halfH = H / 2;
+  const invCell = 1 / cell;
+  for (let y = 0; y < H; y++) {
+    const dY = y + 0.5 - halfH;
+    for (let x = 0; x < W; x++) {
+      const dX = x + 0.5 - halfW;
+      const Qx = cs * dX + sn * dY;
+      const Qy = -sn * dX + cs * dY;
+      const kx0 = Math.floor((Qx - A) * invCell + 0.5);
+      const ky0 = Math.floor((Qy - A) * invCell + 0.5);
+      const px = y * W + x;
+      let dAcc = 1e9;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ky = ky0 + dy;
+        if (ky < -1 || ky > kmax + 1) continue;
+        const rowOff = stagger && ((ky % 2) + 2) % 2 === 1 ? cell / 2 : 0;
+        const ccy = (Qy - (A + ky * cell)) * invCell;
+        const rowBase = (ky + 1) * kw + 1;
+        for (let dx = -1; dx <= 1; dx++) {
+          const kx = kx0 + dx;
+          if (kx < -1 || kx > kmax + 1) continue;
+          const r = grid[rowBase + kx];
+          if (r < 0) continue;
+          const ccx = (Qx - (A + rowOff + kx * cell)) * invCell;
+          const d = htSDF(ccx, ccy, r, shape);
+          // smin(1e9, d, k) degenerates to plain min — no init guard needed
+          dAcc = gooeyK > 0 ? smin(dAcc, d, gooeyK) : Math.min(dAcc, d);
+        }
+      }
+      const aa = 0.5 - dAcc * cell;
+      if (aa <= 0) continue;
+      blend(px, aa >= 1 ? 1 : aa);
+    }
+  }
+}
+
+// Per-DOT variant — the legacy CMYK compositing (each neighbour dot
+// multiplies its ink independently; kept bit-stable for overflow=gooey=0).
+function runHtScreenPerDot(
   W: number,
   H: number,
   cell: number,
@@ -766,6 +832,8 @@ const halftone: Op = (canvas, p, u) => {
   const mode = ps(p, "mode", "mono");
   const stagger = pb(p, "stagger", false);
   const invertCells = pb(p, "invertCells", false);
+  const overflow = clamp(pn(p, "overflow", 0), 0, 1);
+  const gooeyK = clamp(pn(p, "gooey", 0), 0, 1) * 0.4; // smin k, cell units
   const W = canvas.width,
     H = canvas.height;
   const ctx = ctx2d(canvas);
@@ -774,9 +842,10 @@ const halftone: Op = (canvas, p, u) => {
   const o = out.data;
 
   if (mode === "cmyk") {
-    // White paper; each screen's neighbour dots multiply in float (per-dot
-    // mix(1, ink, aa)), quantized once at the end — exactly the GL compositing
-    // order, unlike the old per-layer-8-bit canvas 'multiply'.
+    // White paper; ink layers multiply in float, quantized once at the end —
+    // exactly the GL compositing order. Legacy path multiplies per neighbour
+    // DOT; overflow/gooey fold per SCREEN first (merged dots single-ink).
+    const combined = overflow > 0 || gooeyK > 0;
     const res = new Float64Array(W * H * 3).fill(1);
     const screens: { ink: [number, number, number]; angle: number; chan: number }[] = [
       { ink: [0x00 / 255, 0xae / 255, 0xef / 255], angle: 15, chan: 0 },
@@ -790,14 +859,16 @@ const halftone: Op = (canvas, p, u) => {
         const c = cmyk[scr.chan];
         return invertCells ? 1 - c : c;
       };
-      const s = buildHtScreen(W, H, cell, scr.angle, contrast, stagger, cov);
+      const s = buildHtScreen(W, H, cell, scr.angle, contrast, stagger, overflow, cov);
       const [ir, ig, ib] = scr.ink;
-      runHtScreen(W, H, cell, stagger, shape, s, (px, aa) => {
+      const blend = (px: number, aa: number) => {
         const j = px * 3;
         res[j] *= 1 + (ir - 1) * aa;
         res[j + 1] *= 1 + (ig - 1) * aa;
         res[j + 2] *= 1 + (ib - 1) * aa;
-      });
+      };
+      if (combined) runHtScreen(W, H, cell, stagger, shape, gooeyK, s, blend);
+      else runHtScreenPerDot(W, H, cell, stagger, shape, s, blend);
     }
     for (let px = 0, n = W * H; px < n; px++) {
       const j = px * 3,
@@ -820,9 +891,9 @@ const halftone: Op = (canvas, p, u) => {
     const c = 1 - luma601(src[i], src[i + 1], src[i + 2]) / 255;
     return invertCells ? 1 - c : c;
   };
-  const s = buildHtScreen(W, H, cell, angle, contrast, stagger, cov);
+  const s = buildHtScreen(W, H, cell, angle, contrast, stagger, overflow, cov);
   const mask = new Float64Array(W * H);
-  runHtScreen(W, H, cell, stagger, shape, s, (px, aa) => {
+  runHtScreen(W, H, cell, stagger, shape, gooeyK, s, (px, aa) => {
     if (aa > mask[px]) mask[px] = aa;
   });
   for (let px = 0, n = W * H; px < n; px++) {

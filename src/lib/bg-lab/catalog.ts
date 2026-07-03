@@ -317,6 +317,8 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "switch", key: "aa", label: "Anti-alias", default: true },
       { kind: "switch", key: "stagger", label: "Stagger", default: false },
       { kind: "switch", key: "invertCells", label: "Invert cells", default: false },
+      { kind: "slider", key: "overflow", label: "Overflow", min: 0, max: 1, step: 0.01, default: 0 },
+      { kind: "slider", key: "gooey", label: "Gooey", min: 0, max: 1, step: 0.01, default: 0 },
       { kind: "color", key: "ink", label: "Ink", default: "#191512" },
       { kind: "color", key: "paper", label: "Paper", default: "#f1ece4" },
     ],
