@@ -307,19 +307,21 @@ void main(){
 };
 
 // ---------------------------------------------------------------- halftone (mono + CMYK)
-// GPU accelerator for the CPU `halftone` op (ops.ts). Replicates the CPU lattice
-// EXACTLY so GL preview == CPU still-export: screen rotated about the canvas centre,
-// grid phased from -diag/2 (diag = ceil(hypot(W,H))), cell-centre coverage sampled
-// NEAREST in PERCEPTUAL sRGB (luma601 — NOT linear; linear over-inks mid-tones),
-// uniform radius r = sqrt(cov)*cell*0.71 (= (cell/2)*1.42) for every shape, AA always
-// on (canvas fills always antialias; the `aa` toggle is a no-op on the CPU path too).
-// A 3x3 cell-neighbourhood union reproduces the CPU's painted-over overlapping dots
-// at high coverage (a single fract() cell would clip dots at the cell border).
+// GPU accelerator for the CPU `halftone` op (ops.ts) — the two implement ONE
+// lattice/sampling/AA spec (roadmap §2 parity contract; the CPU op is a per-pixel
+// mirror of this shader): screen rotated about the canvas centre, grid phased from
+// -diag/2 (diag = ceil(hypot(W,H))), cell-centre coverage sampled NEAREST in
+// PERCEPTUAL sRGB (luma601 — NOT linear; linear over-inks mid-tones), uniform
+// radius r = sqrt(cov)*cell*0.71 (= (cell/2)*1.42) for every shape.
+// AA is aaCov: a deterministic 1px linear area ramp on the SDF in PX units —
+// NOT the F2 fwidth aaMask (2px smoothstep, GPU-dependent) and NOT canvas fills
+// (Skia analytic AA): those two could never agree, and were the harness's
+// 12.7/255 mean halftone parity gap. Change aaCov on both sides or neither.
+// A 3x3 cell-neighbourhood union reproduces overlapping dots at high coverage
+// (a single fract() cell would clip dots at the cell border).
 // CMYK (u_mode=1): four rotated screens (C15 M75 Y0 K45), in-shader rgb2cmyk with K
-// extraction, composited by MULTIPLY over white per neighbouring dot — mirrors the CPU
-// canvas globalCompositeOperation:"multiply" of four AA'd ink layers (ops.ts:716-774).
-// Near-exact vs CPU: the CPU quantises to 8-bit after each of the 4 layer composites,
-// the GPU multiplies in float and quantises once, so overlaps can differ by <=1 LSB.
+// extraction, composited by MULTIPLY over white per neighbouring dot; the CPU op
+// multiplies in float and quantises once, same as the GPU.
 const halftone: GpuPass = {
   frag: f(`uniform float u_cell;     // px (already * unit, >= 2)
 uniform float u_angle;    // degrees (mono screen angle)
@@ -337,6 +339,9 @@ float dotSDF(vec2 cc, float r, int shape){
   if(shape==1){ float d=length(cc); return max(d - r, r*0.55 - d); } // ring (annulus)
   return length(cc) - r;                                       // circle
 }
+// 1px linear area ramp on the SDF in PX units — the shared CPU/GL AA spec
+// (see block comment above). dPx = dotSDF(...)*cell.
+float aaCov(float dPx){ return clamp(0.5 - dPx, 0.0, 1.0); }
 // One rotated CMYK screen, multiplied into res over the 3x3 cell neighbourhood
 // (each dot multiplies independently, matching canvas 'multiply' of overlapping fills).
 void cmykScreen(inout vec3 res, vec2 P, vec2 ctr, float cell, float angDeg, vec3 inkCol, int chan){
@@ -365,7 +370,7 @@ void cmykScreen(inout vec3 res, vec2 P, vec2 ctr, float cell, float angDeg, vec3
       cov = pow(clamp(cov, 0.0, 1.0), u_contrast);
       float r = sqrt(cov) * 0.71;
       if(r*cell <= 0.2) continue;
-      res *= mix(vec3(1.0), inkCol, aaMask(dotSDF(cc, r, u_shape)));
+      res *= mix(vec3(1.0), inkCol, aaCov(dotSDF(cc, r, u_shape)*cell));
     }
   }
 }
@@ -381,7 +386,7 @@ void main(){
     cmykScreen(res, P, ctr, cell, 45.0, vec3(0.1020, 0.1020, 0.1020), 3);  // K #1a1a1a
     o = vec4(res, 1.0); return;
   }
-  // mono: paper + single ink screen (verified pixel-identical to the CPU op)
+  // mono: paper + single ink screen
   float ang  = radians(u_angle);
   float cs   = cos(ang), sn = sin(ang);
   vec2  dP   = P - ctr;
@@ -405,8 +410,8 @@ void main(){
       cov = (u_invert > 0.5) ? 1.0 - cov : cov;
       cov = pow(clamp(cov, 0.0, 1.0), u_contrast);
       float r = sqrt(cov) * 0.71;                              // (cell/2 * 1.42)/cell, cell-fraction
-      if(r*cell <= 0.2) continue;                              // CPU drawDot skip threshold
-      ink = max(ink, aaMask(dotSDF(cc, r, u_shape)));
+      if(r*cell <= 0.2) continue;                              // shared dot-skip threshold (px)
+      ink = max(ink, aaCov(dotSDF(cc, r, u_shape)*cell));
     }
   }
   o = vec4(mix(u_paper, u_ink, ink), 1.0);

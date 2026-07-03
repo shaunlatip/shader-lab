@@ -29,6 +29,14 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "halftone", params: {} }],
   },
   {
+    label: "Halftone · CMYK",
+    stack: [{ type: "halftone", params: { mode: "cmyk" } }],
+  },
+  {
+    label: "Halftone · square+stagger",
+    stack: [{ type: "halftone", params: { dotShape: "square", stagger: true, angle: 22, contrast: 1.3 } }],
+  },
+  {
     label: "Dither · Bayer 4x4",
     stack: [{ type: "dither", params: { type: "bayer4" } }],
   },

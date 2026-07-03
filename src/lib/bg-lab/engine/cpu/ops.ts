@@ -627,69 +627,126 @@ const displace: Op = (canvas, p, u) => {
 };
 
 // ---------------------------------------------------------------- halftone
-function drawDot(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, shape: string, cell: number) {
-  if (r <= 0.2) return;
-  if (shape === "square") {
-    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  } else if (shape === "diamond") {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - r);
-    ctx.lineTo(cx + r, cy);
-    ctx.lineTo(cx, cy + r);
-    ctx.lineTo(cx - r, cy);
-    ctx.closePath();
-    ctx.fill();
-  } else if (shape === "line") {
-    ctx.fillRect(cx - cell / 2, cy - r / 2, cell, r);
-  } else if (shape === "ring") {
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.arc(cx, cy, Math.max(0, r * 0.55), 0, Math.PI * 2, true);
-    ctx.fill("evenodd");
-  } else {
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
+// Per-pixel analytic halftone — the exact mirror of the GL pass (shaders.ts),
+// per the roadmap §2 parity contract: ONE lattice/sampling/AA spec, two
+// implementations. Canvas vector fills were replaced because Skia's analytic
+// area AA can never equal a shader's coverage function (the ~12/255 mean
+// parity gap the harness found); with both engines evaluating the same
+// per-pixel math the diff is float-rounding only (≤1 LSB).
+// Spec (must stay in lockstep with the GL shader):
+//   lattice   screen rotated about the canvas centre; first cell-centre at
+//             A = -diag/2 + cell/2, diag = ceil(hypot(W,H)) (legacy CPU phase)
+//   sampling  source read at the cell-centre texel: clamp(floor(Pc+0.5)),
+//             NEAREST, coverage in PERCEPTUAL sRGB luma601 (not linear)
+//   radius    r = sqrt(cov^contrast)*0.71 in cell units; skip if r*cell<=0.2
+//   AA        aaCov(dPx) = clamp(0.5 - dPx, 0..1) — 1px linear area ramp on
+//             the SDF in px units (deterministic; replaces fwidth/canvas AA)
+//   union     mono: max over the pixel's 3x3 cell neighbourhood;
+//             CMYK: multiply mix(1, ink, aa) per neighbour dot per screen,
+//             quantized ONCE at the end (matches GL float compositing)
+
+// SDF in cell units; shape: 0 circle 1 ring 2 line 3 square 4 diamond
+const HT_SHAPES = ["circle", "ring", "line", "square", "diamond"];
+function htSDF(ccx: number, ccy: number, r: number, shape: number): number {
+  if (shape === 3) return Math.max(Math.abs(ccx), Math.abs(ccy)) - r;
+  if (shape === 4) return Math.abs(ccx) + Math.abs(ccy) - r;
+  if (shape === 2) return Math.abs(ccy) - r * 0.5;
+  const d = Math.sqrt(ccx * ccx + ccy * ccy);
+  if (shape === 1) return Math.max(d - r, r * 0.55 - d);
+  return d - r;
 }
 
-function halftoneScreen(
-  canvas: HTMLCanvasElement,
-  src: Uint8ClampedArray,
+interface HtScreen {
+  cs: number;
+  sn: number;
+  A: number;
+  kmax: number;
+  kw: number;
+  grid: Float64Array; // r per cell (cell units), -1 = skipped dot
+}
+
+// Precompute one rotated screen's dot radii: one source sample + pow + sqrt
+// per CELL (not per pixel), indexed [ky+1][kx+1] over the k-range any canvas
+// pixel's 3x3 neighbourhood can touch.
+function buildHtScreen(
+  W: number,
+  H: number,
   cell: number,
   angleDeg: number,
   contrast: number,
-  shape: string,
-  channel: (x: number, y: number) => number, // 0..1 coverage at canvas px
-  ink: string,
-  stagger = false,
-) {
-  const W = canvas.width,
-    H = canvas.height;
-  const ctx = ctx2d(canvas);
-  const ang = (angleDeg * Math.PI) / 180,
-    cos = Math.cos(ang),
-    sin = Math.sin(ang);
-  ctx.save();
-  ctx.fillStyle = ink;
-  ctx.translate(W / 2, H / 2);
-  ctx.rotate(ang);
+  stagger: boolean,
+  cov: (i: number) => number, // 0..1 coverage (invert applied) at src byte index
+): HtScreen {
+  const ang = (angleDeg * Math.PI) / 180;
+  const cs = Math.cos(ang),
+    sn = Math.sin(ang);
   const diag = Math.ceil(Math.sqrt(W * W + H * H));
-  let row = 0;
-  for (let gy = -diag / 2; gy < diag / 2; gy += cell, row++) {
-    const rowOffset = stagger && row % 2 === 1 ? cell / 2 : 0;
-    for (let gx = -diag / 2; gx < diag / 2; gx += cell) {
-      const cx = gx + rowOffset + cell / 2,
-        cy = gy + cell / 2;
-      const sx = cos * cx - sin * cy + W / 2,
-        sy = sin * cx + cos * cy + H / 2;
-      const cov = Math.pow(clamp(channel(sx, sy), 0, 1), contrast);
-      // r = (cell/2)*sqrt(coverage) keeps dot AREA proportional to ink
-      const r = Math.sqrt(cov) * (cell / 2) * 1.42;
-      drawDot(ctx, cx, cy, r, shape, cell);
+  const A = -diag / 2 + cell / 2;
+  const kmax = Math.ceil(diag / cell);
+  const kw = kmax + 3; // k in [-1, kmax+1]
+  const grid = new Float64Array(kw * kw).fill(-1);
+  for (let ky = -1; ky <= kmax + 1; ky++) {
+    // GLSL mod(): result is non-negative for negative ky
+    const rowOff = stagger && ((ky % 2) + 2) % 2 === 1 ? cell / 2 : 0;
+    const Cy = A + ky * cell;
+    for (let kx = -1; kx <= kmax + 1; kx++) {
+      const Cx = A + rowOff + kx * cell;
+      const Pcx = cs * Cx - sn * Cy + W / 2;
+      const Pcy = sn * Cx + cs * Cy + H / 2;
+      const ix = clamp(Math.floor(Pcx + 0.5), 0, W - 1);
+      const iy = clamp(Math.floor(Pcy + 0.5), 0, H - 1);
+      const c = Math.pow(clamp(cov((iy * W + ix) * 4), 0, 1), contrast);
+      const r = Math.sqrt(c) * 0.71;
+      grid[(ky + 1) * kw + (kx + 1)] = r * cell <= 0.2 ? -1 : r;
     }
   }
-  ctx.restore();
+  return { cs, sn, A, kmax, kw, grid };
+}
+
+// Accumulate one screen over every pixel. blend receives (pixelIndex, aa,
+// dotSerial) for each contributing neighbour dot.
+function runHtScreen(
+  W: number,
+  H: number,
+  cell: number,
+  stagger: boolean,
+  shape: number,
+  s: HtScreen,
+  blend: (px: number, aa: number) => void,
+) {
+  const { cs, sn, A, kmax, kw, grid } = s;
+  const halfW = W / 2,
+    halfH = H / 2;
+  const invCell = 1 / cell;
+  for (let y = 0; y < H; y++) {
+    const dY = y + 0.5 - halfH;
+    for (let x = 0; x < W; x++) {
+      const dX = x + 0.5 - halfW;
+      const Qx = cs * dX + sn * dY;
+      const Qy = -sn * dX + cs * dY;
+      const kx0 = Math.floor((Qx - A) * invCell + 0.5);
+      const ky0 = Math.floor((Qy - A) * invCell + 0.5);
+      const px = y * W + x;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ky = ky0 + dy;
+        if (ky < -1 || ky > kmax + 1) continue;
+        const rowOff = stagger && ((ky % 2) + 2) % 2 === 1 ? cell / 2 : 0;
+        const ccy = (Qy - (A + ky * cell)) * invCell;
+        const rowBase = (ky + 1) * kw + 1;
+        for (let dx = -1; dx <= 1; dx++) {
+          const kx = kx0 + dx;
+          if (kx < -1 || kx > kmax + 1) continue;
+          const r = grid[rowBase + kx];
+          if (r < 0) continue;
+          const ccx = (Qx - (A + rowOff + kx * cell)) * invCell;
+          const d = htSDF(ccx, ccy, r, shape);
+          const aa = 0.5 - d * cell;
+          if (aa <= 0) continue;
+          blend(px, aa >= 1 ? 1 : aa);
+        }
+      }
+    }
+  }
 }
 
 // rgb2cmyk: reference separation with K extraction (all in 0..1 linear).
@@ -705,95 +762,78 @@ const halftone: Op = (canvas, p, u) => {
   const cell = Math.max(2, pn(p, "cell", 9) * u);
   const angle = pn(p, "angle", 45);
   const contrast = pn(p, "contrast", 1);
-  const shape = ps(p, "dotShape", "circle");
+  const shape = Math.max(0, HT_SHAPES.indexOf(ps(p, "dotShape", "circle")));
   const mode = ps(p, "mode", "mono");
   const stagger = pb(p, "stagger", false);
   const invertCells = pb(p, "invertCells", false);
   const W = canvas.width,
     H = canvas.height;
-  const srcData = ctx2d(canvas).getImageData(0, 0, W, H).data;
-  const at = (x: number, y: number) => {
-    const xi = clamp(Math.round(x), 0, W - 1),
-      yi = clamp(Math.round(y), 0, H - 1);
-    return (yi * W + xi) * 4;
-  };
   const ctx = ctx2d(canvas);
+  const src = ctx.getImageData(0, 0, W, H).data;
+  const out = ctx.createImageData(W, H);
+  const o = out.data;
 
   if (mode === "cmyk") {
-    // paper = white; overprint C/M/Y/K with multiply at classic screen angles
-    ctx.save();
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
-    const chans: { ink: string; angle: number; cov: (i: number) => number }[] = [
-      {
-        ink: "#00aeef", angle: 15,
-        cov: (i) => {
-          const [c] = rgb2cmyk(
-            srcData[i] / 255,
-            srcData[i + 1] / 255,
-            srcData[i + 2] / 255,
-          );
-          return invertCells ? 1 - c : c;
-        },
-      },
-      {
-        ink: "#ec008c", angle: 75,
-        cov: (i) => {
-          const [, m] = rgb2cmyk(
-            srcData[i] / 255,
-            srcData[i + 1] / 255,
-            srcData[i + 2] / 255,
-          );
-          return invertCells ? 1 - m : m;
-        },
-      },
-      {
-        ink: "#fff200", angle: 0,
-        cov: (i) => {
-          const [, , y] = rgb2cmyk(
-            srcData[i] / 255,
-            srcData[i + 1] / 255,
-            srcData[i + 2] / 255,
-          );
-          return invertCells ? 1 - y : y;
-        },
-      },
-      {
-        ink: "#1a1a1a", angle: 45,
-        cov: (i) => {
-          const [, , , k] = rgb2cmyk(
-            srcData[i] / 255,
-            srcData[i + 1] / 255,
-            srcData[i + 2] / 255,
-          );
-          return invertCells ? 1 - k : k;
-        },
-      },
+    // White paper; each screen's neighbour dots multiply in float (per-dot
+    // mix(1, ink, aa)), quantized once at the end — exactly the GL compositing
+    // order, unlike the old per-layer-8-bit canvas 'multiply'.
+    const res = new Float64Array(W * H * 3).fill(1);
+    const screens: { ink: [number, number, number]; angle: number; chan: number }[] = [
+      { ink: [0x00 / 255, 0xae / 255, 0xef / 255], angle: 15, chan: 0 },
+      { ink: [0xec / 255, 0x00 / 255, 0x8c / 255], angle: 75, chan: 1 },
+      { ink: [0xff / 255, 0xf2 / 255, 0x00 / 255], angle: 0, chan: 2 },
+      { ink: [0x1a / 255, 0x1a / 255, 0x1a / 255], angle: 45, chan: 3 },
     ];
-    for (const c of chans) {
-      ctx.save();
-      ctx.globalCompositeOperation = "multiply";
-      halftoneScreen(canvas, srcData, cell, c.angle, contrast, shape, (x, y) => c.cov(at(x, y)), c.ink, stagger);
-      ctx.restore();
+    for (const scr of screens) {
+      const cov = (i: number) => {
+        const cmyk = rgb2cmyk(src[i] / 255, src[i + 1] / 255, src[i + 2] / 255);
+        const c = cmyk[scr.chan];
+        return invertCells ? 1 - c : c;
+      };
+      const s = buildHtScreen(W, H, cell, scr.angle, contrast, stagger, cov);
+      const [ir, ig, ib] = scr.ink;
+      runHtScreen(W, H, cell, stagger, shape, s, (px, aa) => {
+        const j = px * 3;
+        res[j] *= 1 + (ir - 1) * aa;
+        res[j + 1] *= 1 + (ig - 1) * aa;
+        res[j + 2] *= 1 + (ib - 1) * aa;
+      });
     }
+    for (let px = 0, n = W * H; px < n; px++) {
+      const j = px * 3,
+        k = px * 4;
+      o[k] = Math.round(res[j] * 255);
+      o[k + 1] = Math.round(res[j + 1] * 255);
+      o[k + 2] = Math.round(res[j + 2] * 255);
+      o[k + 3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
     return;
   }
 
-  // mono: paper fill + ink dots sized by perceptual (sRGB) luminance, so mid-gray
-  // maps to ~50% dot coverage. (Measuring in linear light over-inks mid-tones and
-  // the whole screen reads too dark.)
-  const ink = ps(p, "ink", "#191512");
-  const paper = ps(p, "paper", "#f1ece4");
-  ctx.save();
-  ctx.fillStyle = paper;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
-  halftoneScreen(canvas, srcData, cell, angle, contrast, shape, (x, y) => {
-    const i = at(x, y);
-    const cov = 1 - luma601(srcData[i], srcData[i + 1], srcData[i + 2]) / 255;
-    return invertCells ? 1 - cov : cov;
-  }, ink, stagger);
+  // mono: paper + single ink screen. Coverage from perceptual (sRGB) luminance,
+  // so mid-gray maps to ~50% dot coverage. (Measuring in linear light over-inks
+  // mid-tones and the whole screen reads too dark.)
+  const [inkR, inkG, inkB] = hexRGB(ps(p, "ink", "#191512"));
+  const [papR, papG, papB] = hexRGB(ps(p, "paper", "#f1ece4"));
+  const cov = (i: number) => {
+    const c = 1 - luma601(src[i], src[i + 1], src[i + 2]) / 255;
+    return invertCells ? 1 - c : c;
+  };
+  const s = buildHtScreen(W, H, cell, angle, contrast, stagger, cov);
+  const mask = new Float64Array(W * H);
+  runHtScreen(W, H, cell, stagger, shape, s, (px, aa) => {
+    if (aa > mask[px]) mask[px] = aa;
+  });
+  for (let px = 0, n = W * H; px < n; px++) {
+    const m = mask[px],
+      k = px * 4;
+    o[k] = Math.round(papR + (inkR - papR) * m);
+    o[k + 1] = Math.round(papG + (inkG - papG) * m);
+    o[k + 2] = Math.round(papB + (inkB - papB) * m);
+    o[k + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
 };
 
 export const OPS: Record<EffectType, Op> = {

@@ -72,14 +72,21 @@ Small, ordered, each independently shippable:
    pattern/static base to an offscreen bitmap keyed `(W,H,params)`; `drawImage` per frame. Matters
    once animated stacks run on the CPU engine. *(S–M)*
 
-## Known parity gap (found by the harness, 2026-07-02)
+## Halftone parity gap — FIXED (2026-07-03)
 
-`/dev/parity` on the haystack test image, 800×533: every bridged op and the ordered-dither GL pass
-are **pixel-identical** (0.00 max delta) — but **halftone GL vs CPU diverges** (max channel delta
-107/255, mean 12.7, 50.8% of pixels off by >1). Pre-existing, shader-level (nothing in the
-pipeline: bridged ops are 0.00). Prime suspect per roadmap §2: the GL pass samples the source
-through a `LINEAR`-filtered texture while the CPU op samples exact texels — plus possible AA/lattice
-edge differences. Fix alongside P1 work; acceptance = the harness reads ≤1 max delta.
+The 107/255 max-delta halftone divergence was **AA**, not sampling: canvas vector fills (Skia
+analytic area coverage) vs the shader's `fwidth` smoothstep (~2px ramp) can never agree. Fix per
+the roadmap §2 contract: the CPU op was rewritten as a **per-pixel mirror of the GL shader**
+(`ops.ts` `buildHtScreen`/`runHtScreen`) and both engines now share one deterministic AA spec —
+`aaCov(dPx) = clamp(0.5 − dPx, 0..1)`, a 1px linear area ramp on the SDF in px units. CMYK also
+now multiplies ink layers in float and quantises once on both engines.
+
+Harness results (haystack, 800×533): **mono 1.00 max / 0.0009 mean / 0.000% >1; CMYK 1.00 max /
+0.0015 mean / 0.000% >1** (configs added to `/dev/parity`). A square+stagger+angle-22 variant
+reads 8/255 max on 0.004% of pixels — `floor(Pc+0.5)` texel-choice ties where GPU f32 trig and
+CPU f64 trig disagree; GPU trig is implementation-defined, so tie-break exactness is out of
+reach in principle. Bounded, rare, accepted. Cost note: the CPU halftone is now O(pixels×9 dots)
+(~2–4× slower than the old vector fills) — fine for export (F0 truth), and GL is the preview path.
 
 ## P1 — Bridge-killers: GL passes for the heavy bridged ops
 
