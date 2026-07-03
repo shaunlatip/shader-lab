@@ -1,11 +1,12 @@
 // BG Lab — GPU-native effect passes. Each entry is a fragment shader plus a
 // uniform setter; the engine runs them as single fragment passes over the
-// ping-pong chain. Ops NOT listed here (blur, bloom, grain, gradient map,
-// CMYK/error-diffusion dither, shaped pixelate, and all glyph/converter styles)
-// run through the CPU bridge instead — see glEngine.shouldBridge.
+// ping-pong chain. Ops NOT listed here (blur, bloom, grain,
+// CMYK/error-diffusion dither, shaped pixelate, gradient maps with >8 stops,
+// and all glyph/converter styles) run through the CPU bridge instead — see
+// glEngine.shouldBridge.
 
 import type { EffectType, ParamValue } from "../../types";
-import { hexRGB, pb, pn, ps } from "../cpu/util";
+import { hexRGB, pb, pn, ps, pstops } from "../cpu/util";
 
 export interface GpuPass {
   frag: string;
@@ -429,6 +430,82 @@ void main(){
   },
 };
 
+// ---------------------------------------------------------------- CRT curvature
+// Mirrors cpu/postfx.ts crtCurvature exactly: integer pixel coords (not pixel
+// centres) for the barrel-warp math, NEAREST source sample via round(), and the
+// same out-of-bounds → black / edge-darkening formulas. amount<=0 is a CPU
+// no-op; the GL pass has no per-effect skip, so it passes the source through.
+const crtCurvature: GpuPass = {
+  frag: f(`uniform float u_amount; uniform float u_edge;
+void main(){
+  vec4 c0=texture(u_tex,v_uv);
+  if(u_amount<=0.0){ o=c0; return; }
+  vec2 px=floor(vec2(v_uv.x, 1.0-v_uv.y)*u_dims);           // integer x,y (top-left origin)
+  float cx=u_dims.x*0.5, cy=u_dims.y*0.5;
+  float norm=max(cx,cy);
+  float nx=(px.x-cx)/norm, ny=(px.y-cy)/norm;
+  float r2=nx*nx+ny*ny;
+  float k=1.0+u_amount*r2;
+  float sx=cx+(px.x-cx)*k, sy=cy+(px.y-cy)*k;
+  if(sx<0.0||sx>=u_dims.x||sy<0.0||sy>=u_dims.y){ o=vec4(0.0,0.0,0.0,1.0); return; }
+  vec2 idx=clamp(floor(vec2(sx,sy)+0.5), vec2(0.0), u_dims-1.0);  // NEAREST (CPU round())
+  vec3 src=texture(u_tex, vec2((idx.x+0.5)/u_dims.x, 1.0-(idx.y+0.5)/u_dims.y)).rgb;
+  float dark=1.0-clamp((r2-(1.0-u_edge))/max(0.001,u_edge),0.0,1.0)*u_edge;
+  o=vec4(src*dark, 1.0);
+}`),
+  setUniforms: (gl, prog, p) => {
+    gl.uniform1f(loc(gl, prog, "u_amount"), pn(p, "amount", 0.25));
+    gl.uniform1f(loc(gl, prog, "u_edge"), pn(p, "edge", 0.3));
+  },
+};
+
+// ---------------------------------------------------------------- gradient map
+// Mirrors cpu/ops.ts gradientMap: an 8-bit-quantized LUT built from SORTED
+// stops (segment search: first s where t>=stop[s].t && t<=stop[s+1].t, default
+// a=first/b=last), keyed by Rec.709 luma (matches CPU `luma`, NOT luma601).
+// Stops are passed as fixed-size uniform arrays (max 8; more bridges to CPU —
+// see glEngine.shouldBridge). u_nstops===0 (fewer than 2 stops) passes through,
+// matching the CPU op's early return.
+const gradientMap: GpuPass = {
+  frag: f(`uniform float u_stopT[8]; uniform vec3 u_stopC[8]; uniform int u_nstops; uniform float u_amount;
+void main(){
+  vec4 c=texture(u_tex,v_uv);
+  if(u_nstops<2){ o=c; return; }
+  float li=floor(luma709(c.rgb)*255.0+0.5);
+  float t=li/255.0;
+  int ai=0, bi=u_nstops-1;
+  for(int s=0;s<7;s++){
+    if(s>=u_nstops-1) break;
+    if(t>=u_stopT[s] && t<=u_stopT[s+1]){ ai=s; bi=s+1; break; }
+  }
+  float at=u_stopT[ai], bt=u_stopT[bi];
+  vec3 ca=u_stopC[ai], cb=u_stopC[bi];
+  float span = (bt-at)==0.0 ? 1.0 : (bt-at);
+  float k=clamp((t-at)/span,0.0,1.0);
+  vec3 ramp=mix(ca,cb,k);
+  ramp=floor(ramp*255.0+0.5)/255.0;                     // quantize to 8-bit, matching the CPU LUT
+  o=vec4(mix(c.rgb,ramp,u_amount),c.a);
+}`),
+  setUniforms: (gl, prog, p) => {
+    const stops = pstops(p, "stops");
+    const sorted = [...stops].sort((a, b) => a.t - b.t).slice(0, 8);
+    const n = sorted.length >= 2 ? sorted.length : 0;
+    const tArr = new Float32Array(8);
+    const cArr = new Float32Array(8 * 3);
+    for (let i = 0; i < sorted.length; i++) {
+      tArr[i] = sorted[i].t;
+      const [r, g, b] = hexRGB(sorted[i].color);
+      cArr[i * 3] = r / 255;
+      cArr[i * 3 + 1] = g / 255;
+      cArr[i * 3 + 2] = b / 255;
+    }
+    gl.uniform1fv(loc(gl, prog, "u_stopT[0]"), tArr);
+    gl.uniform3fv(loc(gl, prog, "u_stopC[0]"), cArr);
+    gl.uniform1i(loc(gl, prog, "u_nstops"), n);
+    gl.uniform1f(loc(gl, prog, "u_amount"), pn(p, "amount", 1));
+  },
+};
+
 export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   grayscale,
   threshold,
@@ -443,4 +520,6 @@ export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   pixelate,
   dither,
   halftone,
+  crtCurvature,
+  gradientMap,
 };

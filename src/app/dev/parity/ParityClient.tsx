@@ -52,6 +52,26 @@ const TEST_CONFIGS: TestConfig[] = [
     label: "Gradient map",
     stack: [{ type: "gradientMap", params: {} }],
   },
+  {
+    label: "Gradient map · 4 stops",
+    stack: [
+      {
+        type: "gradientMap",
+        params: {
+          stops: [
+            { t: 0, color: "#0a0a14" },
+            { t: 0.35, color: "#7a2848" },
+            { t: 0.7, color: "#e8845a" },
+            { t: 1, color: "#f7ecd9" },
+          ],
+        },
+      },
+    ],
+  },
+  {
+    label: "CRT curvature",
+    stack: [{ type: "crtCurvature", params: {} }],
+  },
 ];
 
 function buildConfig(test: TestConfig): BgConfig {

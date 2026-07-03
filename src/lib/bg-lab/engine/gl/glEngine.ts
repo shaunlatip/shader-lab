@@ -2,10 +2,10 @@
 // (cover-fit source / solid) is composited on a 2D scratch canvas — reusing the
 // exact CPU letterboxing — then uploaded as the first texture. Each effect then
 // runs either as a GPU fragment pass (GL_OPS) over a ping-pong FBO chain, or, for
-// ops that don't shader cleanly (blur/bloom/grain/gradientMap/CMYK+FS-dither/
-// shaped-pixelate + every glyph/converter style), through a CPU bridge: blit the
-// current texture out, run the existing CPU op, re-upload. Correct for every op;
-// GPU-accelerated for the portable ones.
+// ops that don't shader cleanly (blur/bloom/grain/CMYK+FS-dither/shaped-pixelate/
+// gradientMap with >8 stops + every glyph/converter style), through a CPU bridge:
+// blit the current texture out, run the existing CPU op, re-upload. Correct for
+// every op; GPU-accelerated for the portable ones.
 
 import type { BgConfig, Dims, Effect, ParamValue } from "../../types";
 import { unit } from "../../resolution";
@@ -27,6 +27,7 @@ function shouldBridge(eff: Effect): boolean {
     // GL pass exists, but a few param modes still need the CPU path.
     if (t === "dither" && (eff.params.type === "floydSteinberg" || eff.params.type === "atkinson" || eff.params.type === "sierra")) return true;
     if (t === "pixelate" && eff.params.shape && eff.params.shape !== "square") return true;
+    if (t === "gradientMap" && Array.isArray(eff.params.stops) && (eff.params.stops as unknown[]).length > 8) return true;
     return false;
   }
   return true; // no GPU pass → bridge to the CPU op
