@@ -92,6 +92,18 @@ const TEST_CONFIGS: TestConfig[] = [
     label: "Line art · ink+hatch",
     stack: [{ type: "lineArt", params: { mode: "ink", hatchSpacing: 6 } }],
   },
+  {
+    label: "Blur · gaussian",
+    stack: [{ type: "blur", params: { radius: 8 } }],
+  },
+  {
+    label: "Blur · directional",
+    stack: [{ type: "blur", params: { radius: 12, mode: "directional", angle: 30 } }],
+  },
+  {
+    label: "Bloom",
+    stack: [{ type: "bloom", params: {} }],
+  },
 ];
 
 function buildConfig(test: TestConfig): BgConfig {

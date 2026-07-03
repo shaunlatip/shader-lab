@@ -1,12 +1,13 @@
 // BG Lab — WebGL2 engine. Same RenderEngine contract as the CPU engine. The base
 // (cover-fit source / solid) is composited on a 2D scratch canvas — reusing the
 // exact CPU letterboxing — then uploaded as the first texture. Each effect then
-// runs either as a GPU fragment pass (GL_OPS) over a ping-pong FBO chain, or, for
-// ops that don't shader cleanly (blur/bloom/CMYK+FS-dither/shaped-pixelate/
-// gradientMap with >8 stops + every glyph/converter style except kuwahara and
-// lineArt, which have their own GL passes — see shaders.ts), through a CPU
-// bridge: blit the current texture out, run the existing CPU op, re-upload.
-// Correct for every op; GPU-accelerated for the portable ones.
+// runs either as a GPU fragment pass (GL_OPS, single-pass or F5a multi-pass)
+// over the ping-pong FBO chain, or, for ops that don't shader cleanly
+// (CMYK+FS-dither/shaped-pixelate/gradientMap with >8 stops + every
+// glyph/converter style except kuwahara and lineArt, which have their own GL
+// passes — see shaders.ts), through a CPU bridge: blit the current texture
+// out, run the existing CPU op, re-upload. Correct for every op;
+// GPU-accelerated for the portable ones.
 
 import type { BgConfig, Dims, Effect, ParamValue } from "../../types";
 import { unit } from "../../resolution";
@@ -16,7 +17,7 @@ import { drawTransformedSource } from "../cpu/sourceTransform";
 import { drawPattern } from "../cpu/patterns";
 import { OPS } from "../cpu/ops";
 import { GLContext, type GLTexture } from "./glContext";
-import { GL_OPS, type AssetTexKey } from "./shaders";
+import { GL_OPS, type AssetTexKey, type MultiPassCtx } from "./shaders";
 import { BLUE_NOISE_128, BLUE_NOISE_SIZE } from "../bluenoise";
 
 const DEFAULT_BG = "#cdd9e0";
@@ -49,6 +50,9 @@ export class GLEngine implements RenderEngine {
   private t0 = 0;
   /** F4 asset-texture cache: sampler-only textures for GpuPass.samplers. */
   private assets = new Map<AssetTexKey, WebGLTexture>();
+  /** F5a same-size temp pool for multi-pass ops, keyed by name. Sized W×H;
+   * dropped wholesale on resize (ensureBuffers) and dispose. */
+  private temps = new Map<string, GLTexture>();
 
   constructor() {
     this.glc = new GLContext();
@@ -60,10 +64,14 @@ export class GLEngine implements RenderEngine {
    * program cache. One failure must not stop the rest from being checked. */
   private selfCheck() {
     for (const [type, pass] of Object.entries(GL_OPS)) {
-      try {
-        this.glc.program(pass!.frag);
-      } catch (err) {
-        console.error(`[bg-lab] GL pass '${type}' failed to compile:`, err);
+      const frags = pass!.frag ? [pass!.frag] : (pass!.frags ?? []);
+      if (!pass!.frag && !pass!.frags?.length) console.error(`[bg-lab] GL pass '${type}' declares neither frag nor frags`);
+      for (const frag of frags) {
+        try {
+          this.glc.program(frag);
+        } catch (err) {
+          console.error(`[bg-lab] GL pass '${type}' failed to compile:`, err);
+        }
       }
     }
   }
@@ -80,10 +88,36 @@ export class GLEngine implements RenderEngine {
     if (this.a) gl.deleteTexture(this.a.tex), gl.deleteFramebuffer(this.a.fbo);
     if (this.b) gl.deleteTexture(this.b.tex), gl.deleteFramebuffer(this.b.fbo);
     if (this.baseTex) gl.deleteTexture(this.baseTex.tex), gl.deleteFramebuffer(this.baseTex.fbo);
+    this.temps.forEach((tx) => {
+      gl.deleteTexture(tx.tex);
+      gl.deleteFramebuffer(tx.fbo);
+    });
+    this.temps.clear();
     this.a = this.glc.createTexture(W, H);
     this.b = this.glc.createTexture(W, H);
     this.baseTex = this.glc.createTexture(W, H);
     this.baseSig = null; // buffer contents are gone — force a recomposite
+  }
+
+  /** F5a pooled same-size temp target. */
+  private tempTex(name: string, W: number, H: number): GLTexture {
+    let tx = this.temps.get(name);
+    if (!tx || tx.w !== W || tx.h !== H) {
+      if (tx) {
+        this.glc.gl.deleteTexture(tx.tex);
+        this.glc.gl.deleteFramebuffer(tx.fbo);
+      }
+      tx = this.glc.createTexture(W, H);
+      this.temps.set(name, tx);
+    }
+    return tx;
+  }
+
+  /** Resolve a MultiPassCtx dst handle back to its pooled GLTexture (dst is
+   * either a temp or the op output; output is handled by the caller). */
+  private tempByTex(tex: WebGLTexture): GLTexture {
+    for (const tx of this.temps.values()) if (tx.tex === tex) return tx;
+    throw new Error("multi-pass dst is neither ctx.output nor a ctx.temp");
   }
 
   private scratch(which: "base" | "bridge", W: number, H: number): HTMLCanvasElement {
@@ -167,12 +201,34 @@ export class GLEngine implements RenderEngine {
         continue;
       }
       const pass = GL_OPS[eff.type]!;
-      const prog = this.glc.program(pass.frag);
+      if (pass.multi) {
+        // F5a: N same-size steps; the op's final step must write ctx.output.
+        const inputTex = cur;
+        const outputTex = other;
+        const ctx: MultiPassCtx = {
+          input: { tex: inputTex.tex },
+          output: { tex: outputTex.tex },
+          temp: (name) => ({ tex: this.tempTex(name, W, H).tex }),
+          run: (frag, dst, reads, set) => {
+            const dstGL = dst.tex === outputTex.tex ? outputTex : this.tempByTex(dst.tex);
+            this.glc.pass(this.glc.program(frag), dstGL, reads, (g, pr) => {
+              setCommon(this.glc, g, pr, W, H, u, t);
+              set?.(g, pr);
+            });
+          },
+        };
+        pass.multi(ctx, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
+        const tmp = cur;
+        cur = other;
+        other = tmp;
+        continue;
+      }
+      const prog = this.glc.program(pass.frag!);
       const reads = [{ name: "u_tex", tex: cur.tex }];
       if (pass.samplers) for (const s of pass.samplers) reads.push({ name: s.name, tex: this.assetTex(s.key) });
       this.glc.pass(prog, other, reads, (g, pr) => {
         setCommon(this.glc, g, pr, W, H, u, t);
-        pass.setUniforms(g, pr, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
+        pass.setUniforms?.(g, pr, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
       });
       const tmp = cur;
       cur = other;
@@ -205,6 +261,11 @@ export class GLEngine implements RenderEngine {
     const gl = this.glc.gl;
     this.assets.forEach((t) => gl.deleteTexture(t));
     this.assets.clear();
+    this.temps.forEach((tx) => {
+      gl.deleteTexture(tx.tex);
+      gl.deleteFramebuffer(tx.fbo);
+    });
+    this.temps.clear();
     if (this.a) gl.deleteTexture(this.a.tex), gl.deleteFramebuffer(this.a.fbo);
     if (this.b) gl.deleteTexture(this.b.tex), gl.deleteFramebuffer(this.b.fbo);
     if (this.baseTex) gl.deleteTexture(this.baseTex.tex), gl.deleteFramebuffer(this.baseTex.fbo);

@@ -1,8 +1,9 @@
 // BG Lab — GPU-native effect passes. Each entry is a fragment shader plus a
 // uniform setter; the engine runs them as single fragment passes over the
-// ping-pong chain. Ops NOT listed here (blur, bloom,
-// CMYK/error-diffusion dither, shaped pixelate, gradient maps with >8 stops,
-// and all glyph/converter styles except kuwahara and lineArt) run through the
+// ping-pong chain (or, for `multi` ops, N same-size steps via MultiPassCtx —
+// see blur/bloom/characterBloom below). Ops NOT listed here (CMYK/
+// error-diffusion dither, shaped pixelate, gradient maps with >8 stops, and
+// all glyph/converter styles except kuwahara and lineArt) run through the
 // CPU bridge instead — see glEngine.shouldBridge.
 
 import type { EffectType, ParamValue } from "../../types";
@@ -12,11 +13,34 @@ import { hexRGB, pb, pn, ps, pstops } from "../cpu/util";
  * Keys resolve via glEngine's asset cache — sampler-only textures (no FBO). */
 export type AssetTexKey = "blueNoise128";
 
+/** F5a: executor handed to multi-pass ops. All targets are same-size (W×H).
+ * `input` is the op's source in the ping-pong chain (read-only), `output` is
+ * where the FINAL step must land; `temp(name)` returns pooled intermediates;
+ * `run` executes one fragment step (common uniforms u_texel/u_dims/u_unit/
+ * u_time are set automatically; per-step uniforms via `set`). */
+export interface MultiPassCtx {
+  input: { tex: WebGLTexture };
+  output: { tex: WebGLTexture };
+  temp: (name: string) => { tex: WebGLTexture };
+  run: (
+    frag: string,
+    dst: { tex: WebGLTexture },
+    reads: { name: string; tex: WebGLTexture }[],
+    set?: (gl: WebGL2RenderingContext, prog: WebGLProgram) => void,
+  ) => void;
+}
+
 export interface GpuPass {
-  frag: string;
-  /** Extra sampler bindings: uniform `name` reads asset `key`. */
+  /** Single-pass fragment source. Exactly one of `frag` / `multi` is set. */
+  frag?: string;
+  /** Extra sampler bindings: uniform `name` reads asset `key` (single-pass). */
   samplers?: { name: string; key: AssetTexKey }[];
-  setUniforms: (gl: WebGL2RenderingContext, prog: WebGLProgram, p: Record<string, ParamValue>, u: number, t: number, dims: { w: number; h: number }) => void;
+  setUniforms?: (gl: WebGL2RenderingContext, prog: WebGLProgram, p: Record<string, ParamValue>, u: number, t: number, dims: { w: number; h: number }) => void;
+  /** F5a multi-pass body: run N same-size steps via the ctx. */
+  multi?: (ctx: MultiPassCtx, p: Record<string, ParamValue>, u: number, t: number, dims: { w: number; h: number }) => void;
+  /** Static list of every frag a `multi` op can run — dev self-check compiles
+   * these at startup (single-pass ops are checked via `frag`). */
+  frags?: string[];
 }
 
 const HEADER = `#version 300 es
@@ -842,6 +866,342 @@ void main(){
   },
 };
 
+// ---------------------------------------------------------------- copy (identity passthrough)
+// F5a multi-pass ops always run their final step into ctx.output — the engine
+// unconditionally ping-pongs — so an op's identity case (radius/intensity<=0,
+// matching the CPU op's early `return`) still needs one GPU copy step.
+const COPY_FRAG = f(`void main(){ o=texture(u_tex,v_uv); }`);
+
+// ---------------------------------------------------------------- blur (multi-pass)
+// Mirrors cpu/ops.ts `blur` exactly in its deterministic geometry/weights;
+// the only intentional divergence is the gaussian *shape* itself (canvas
+// `ctx.filter = blur(r)` is a Skia-approximated gaussian, GL runs a true
+// separable gaussian with sigma=r) — see PARITY DOCTRINE at the top of this
+// task's harness notes. All four modes share u_dims/u_texel/u_unit already
+// bound by MultiPassCtx.run's common-uniform setter.
+//
+// Shared separable gaussian pass, parameterized by u_zoom (overscan resample,
+// CPU's `drawImage(snap,-r,-r,W+2r,H+2r)`) and u_horiz (H vs V direction).
+// Zoom inverse-maps dest px -> source px: sx = (dx+r)*W/(W+2r) (see task
+// notes derivation); with zoom, the sampled sx/sy always lands in [0,W]x[0,H]
+// (the overscan draw guarantees full source coverage with margin), so no
+// edge-fade is needed — unlike bloom's zero-padded variant below.
+// N_MAX=64 is a constant loop bound (GLSL ES 3.00 requires compile-time loop
+// bounds); u_taps <= 64 always (radius is UI-capped at 40*unit, and
+// step = max(1, 3*sigma/64) keeps N = ceil(3*sigma) taps capped at 64).
+const GAUSS_FRAG = f(`const int N_MAX = 64;
+uniform float u_sigma;
+uniform int u_taps;     // min(64, ceil(3*sigma))
+uniform float u_step;   // px per tap, >= 1
+uniform float u_horiz;  // 1 = horizontal pass, 0 = vertical
+uniform float u_zoom;   // 1 = overscan resample (CPU's -r,-r,W+2r,H+2r draw), 0 = direct
+uniform float u_r;      // overscan radius (only used when u_zoom>0)
+void main(){
+  vec4 c0 = texture(u_tex, v_uv);
+  if(u_sigma<=0.0){ o=c0; return; }
+  // dest pixel, canvas top-left-origin space
+  vec2 px = vec2(v_uv.x*u_dims.x, (1.0-v_uv.y)*u_dims.y);
+  vec3 acc = vec3(0.0);
+  float wsum = 0.0;
+  for(int i=-N_MAX; i<=N_MAX; i++){
+    if(abs(i)>u_taps) continue;
+    float d = float(i)*u_step;
+    float w = exp(-0.5*(d/u_sigma)*(d/u_sigma));
+    vec2 sp = px + (u_horiz>0.5 ? vec2(d,0.0) : vec2(0.0,d));
+    vec2 srcPx;
+    if(u_zoom>0.5){
+      // inverse of drawImage(snap,-r,-r,W+2r,H+2r): sx=(dx+r)*W/(W+2r)
+      srcPx = (sp + u_r) * u_dims / (u_dims + 2.0*u_r);
+    } else {
+      srcPx = sp;
+    }
+    vec2 uv = vec2(srcPx.x/u_dims.x, 1.0-srcPx.y/u_dims.y);
+    acc += texture(u_tex, uv).rgb * w;
+    wsum += w;
+  }
+  o = vec4(acc/max(wsum,1e-6), c0.a);
+}`);
+
+// Directional blur: single step, 14 equal-weight taps along (cos,sin)*r,
+// renormalized over in-bounds samples (CPU's incremental 1/(i+1) globalAlpha
+// average is mathematically an equal-weight mean over drawn — i.e. in-bounds
+// — copies; out-of-bounds copies contribute transparent pixels that don't
+// change the running average once renormalized). v_uv +y is up, canvas +y is
+// down, so the y offset is negated before applying to v_uv.
+const DIRECTIONAL_FRAG = f(`uniform vec2 u_off; // (dx,dy) in canvas px for tap 13 (max t)
+void main(){
+  vec4 c0 = texture(u_tex, v_uv);
+  vec3 acc = vec3(0.0);
+  float wsum = 0.0;
+  for(int i=0;i<14;i++){
+    float tt = (float(i)/13.0 - 0.5)*2.0;
+    vec2 offPx = u_off*tt;
+    vec2 uv = v_uv + vec2(offPx.x, -offPx.y)*u_texel;
+    if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0) continue;
+    acc += texture(u_tex, uv).rgb;
+    wsum += 1.0;
+  }
+  if(wsum<=0.0){ o=c0; return; }
+  o = vec4(acc/wsum, c0.a);
+}`);
+
+// Radial (zoom) blur: single step, 14 equal-weight scaled copies s_i = 1 + k*(i/13),
+// all s>=1 so the inverse sample ctr + (p-ctr)/s_i is always in-bounds — no
+// renormalization needed (matches CPU: every copy is fully opaque/in-bounds).
+const RADIAL_FRAG = f(`uniform float u_k; // r / max(W,H)
+void main(){
+  vec2 px = vec2(v_uv.x*u_dims.x, (1.0-v_uv.y)*u_dims.y);
+  vec2 ctr = 0.5*u_dims;
+  vec3 acc = vec3(0.0);
+  for(int i=0;i<14;i++){
+    float s = 1.0 + u_k*(float(i)/13.0);
+    vec2 sp = ctr + (px-ctr)/s;
+    vec2 uv = vec2(sp.x/u_dims.x, 1.0-sp.y/u_dims.y);
+    acc += texture(u_tex, uv).rgb;
+  }
+  o = vec4(acc/14.0, texture(u_tex, v_uv).a);
+}`);
+
+// TiltShift combine: mix(blurred, sharp, mask(y)) where mask is the CPU's
+// clamped-stop linear gradient (createLinearGradient with 4 stops, each
+// clamped to [0,1] of canvas height) — piecewise-linear ramp 0->1->1->0 over
+// [cy-half-feather, cy-half, cy+half, cy+half+feather]. u_tex = blurred temp,
+// u_sharp = original input.
+const TILTSHIFT_COMBINE_FRAG = f(`uniform sampler2D u_sharp;
+uniform float u_stop0, u_stop1, u_stop2, u_stop3; // clamped [0,1] gradient stops (canvas y/H)
+float rampAt(float y01){
+  if(y01<=u_stop0) return 0.0;
+  if(y01<u_stop1) return u_stop1>u_stop0 ? (y01-u_stop0)/(u_stop1-u_stop0) : 1.0;
+  if(y01<=u_stop2) return 1.0;
+  if(y01<u_stop3) return u_stop3>u_stop2 ? 1.0-(y01-u_stop2)/(u_stop3-u_stop2) : 0.0;
+  return 0.0;
+}
+void main(){
+  vec4 blurred = texture(u_tex, v_uv);
+  vec4 sharp = texture(u_sharp, v_uv);
+  float y01 = (1.0-v_uv.y); // canvas-space y/H (top-down)
+  float m = rampAt(y01);
+  o = vec4(mix(blurred.rgb, sharp.rgb, m), blurred.a);
+}`);
+
+const BLUR_FRAGS = [COPY_FRAG, GAUSS_FRAG, DIRECTIONAL_FRAG, RADIAL_FRAG, TILTSHIFT_COMBINE_FRAG];
+
+function gaussTaps(sigma: number): { taps: number; step: number } {
+  const taps = Math.min(64, Math.ceil(3 * sigma));
+  const step = Math.max(1, (3 * sigma) / 64);
+  return { taps, step };
+}
+
+function runGauss(
+  ctx: MultiPassCtx,
+  src: { tex: WebGLTexture },
+  dst: { tex: WebGLTexture },
+  sigma: number,
+  horiz: boolean,
+  zoom: boolean,
+  r: number,
+) {
+  const { taps, step } = gaussTaps(sigma);
+  ctx.run(GAUSS_FRAG, dst, [{ name: "u_tex", tex: src.tex }], (gl, prog) => {
+    gl.uniform1f(loc(gl, prog, "u_sigma"), sigma);
+    gl.uniform1i(loc(gl, prog, "u_taps"), taps);
+    gl.uniform1f(loc(gl, prog, "u_step"), step);
+    gl.uniform1f(loc(gl, prog, "u_horiz"), horiz ? 1 : 0);
+    gl.uniform1f(loc(gl, prog, "u_zoom"), zoom ? 1 : 0);
+    gl.uniform1f(loc(gl, prog, "u_r"), r);
+  });
+}
+
+const blur: GpuPass = {
+  frags: BLUR_FRAGS,
+  multi: (ctx, p, u, t, dims) => {
+    const r = Math.max(0, pn(p, "radius", 6) * u);
+    const mode = ps(p, "mode", "gaussian");
+    if (r <= 0) {
+      // identity: engine always swaps, so copy input -> output explicitly.
+      ctx.run(COPY_FRAG, ctx.output, [{ name: "u_tex", tex: ctx.input.tex }]);
+      return;
+    }
+    if (mode === "directional") {
+      const ang = (pn(p, "angle", 0) * Math.PI) / 180;
+      const dx = Math.cos(ang) * r,
+        dy = Math.sin(ang) * r;
+      ctx.run(DIRECTIONAL_FRAG, ctx.output, [{ name: "u_tex", tex: ctx.input.tex }], (gl, prog) => {
+        gl.uniform2f(loc(gl, prog, "u_off"), dx, dy);
+      });
+      return;
+    }
+    if (mode === "radial") {
+      const W = dims.w,
+        H = dims.h;
+      const k = r / Math.max(W, H);
+      ctx.run(RADIAL_FRAG, ctx.output, [{ name: "u_tex", tex: ctx.input.tex }], (gl, prog) => {
+        gl.uniform1f(loc(gl, prog, "u_k"), k);
+      });
+      return;
+    }
+    if (mode === "tiltShift") {
+      const H = dims.h;
+      const blurH = ctx.temp("blurH");
+      const blurV = ctx.temp("blurV");
+      // zoom only in H: GAUSS_FRAG's overscan map rescales BOTH axes, so the
+      // V pass over the already-zoomed intermediate must not re-apply it.
+      runGauss(ctx, ctx.input, blurH, r, true, true, r);
+      runGauss(ctx, blurH, blurV, r, false, false, 0);
+      const center = pn(p, "center", 0.5);
+      const band = pn(p, "band", 0.3);
+      const cy = center * H,
+        half = (band * H) / 2,
+        feather = half * 0.7;
+      const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+      const s0 = clamp01((cy - half - feather) / H);
+      const s1 = clamp01((cy - half) / H);
+      const s2 = clamp01((cy + half) / H);
+      const s3 = clamp01((cy + half + feather) / H);
+      ctx.run(
+        TILTSHIFT_COMBINE_FRAG,
+        ctx.output,
+        [
+          { name: "u_tex", tex: blurV.tex },
+          { name: "u_sharp", tex: ctx.input.tex },
+        ],
+        (gl, prog) => {
+          gl.uniform1f(loc(gl, prog, "u_stop0"), s0);
+          gl.uniform1f(loc(gl, prog, "u_stop1"), s1);
+          gl.uniform1f(loc(gl, prog, "u_stop2"), s2);
+          gl.uniform1f(loc(gl, prog, "u_stop3"), s3);
+        },
+      );
+      return;
+    }
+    // gaussian (default): 2-pass separable, with overscan zoom (H only — the
+    // frag's zoom map rescales both axes; re-applying it in V doubles it).
+    const blurH = ctx.temp("blurH");
+    runGauss(ctx, ctx.input, blurH, r, true, true, r);
+    runGauss(ctx, blurH, ctx.output, r, false, false, 0);
+  },
+};
+
+// ---------------------------------------------------------------- bloom / characterBloom (multi-pass)
+// Both CPU ops (ops.ts `bloom`, postfx.ts `characterBloom`) are byte-identical
+// 4-step pipelines differing only in default param values — so the GL side
+// shares one set of frags/step-runner and each op only supplies its own
+// uniform values (threshold/intensity/radius defaults).
+//
+// Step 1: bright-extract. Snap to 8-bit ints (matching CPU's Uint8ClampedArray
+// canvas backing) before comparing against thr*255, exactly like the CPU op's
+// `luma601(bd[i],bd[i+1],bd[i+2]) < thr` on already-8-bit imageData.
+const BLOOM_BRIGHT_FRAG = f(`uniform float u_thr255;
+void main(){
+  vec3 c8 = floor(texture(u_tex,v_uv).rgb*255.0+0.5);
+  float l = luma601(c8);
+  vec3 rgb = l < u_thr255 ? vec3(0.0) : c8/255.0;
+  o = vec4(rgb, 1.0);
+}`);
+
+// Steps 2/3: separable gaussian on the bright pass, NO overscan zoom and
+// ZERO-PADDING at the edges (matches the CPU's canvas blur of a bright layer
+// drawn at (0,0) with no overscan: samples outside the canvas are
+// transparent black, fading the blurred edges toward transparent). Premultiplied
+// accumulation: rgbSum/wTotal in rgb, aSum/wTotal in alpha, both divided by
+// the FULL tap weight total (including out-of-bounds taps) so edges fade
+// exactly like the canvas compositing does.
+const BLOOM_GAUSS_FRAG = f(`const int N_MAX = 64;
+uniform float u_sigma;
+uniform int u_taps;
+uniform float u_step;
+uniform float u_horiz;
+void main(){
+  vec2 px = vec2(v_uv.x*u_dims.x, (1.0-v_uv.y)*u_dims.y);
+  vec3 rgbSum = vec3(0.0);
+  float aSum = 0.0;
+  float wTotal = 0.0;
+  for(int i=-N_MAX; i<=N_MAX; i++){
+    if(abs(i)>u_taps) continue;
+    float d = float(i)*u_step;
+    float w = exp(-0.5*(d/u_sigma)*(d/u_sigma));
+    wTotal += w;
+    vec2 sp = px + (u_horiz>0.5 ? vec2(d,0.0) : vec2(0.0,d));
+    if(sp.x<0.0||sp.x>=u_dims.x||sp.y<0.0||sp.y>=u_dims.y) continue; // zero-pad: no contribution
+    vec2 uv = vec2(sp.x/u_dims.x, 1.0-sp.y/u_dims.y);
+    vec4 s = texture(u_tex, uv);
+    rgbSum += s.rgb*w;   // premultiplied-by-weight accumulation
+    aSum += s.a*w;
+  }
+  o = vec4(rgbSum/max(wTotal,1e-6), aSum/max(wTotal,1e-6));
+}`);
+
+// Step 4: screen-composite. Src (blurred bright pass) is premultiplied
+// (pr,pa); unpremultiply to get s, then screen-blend over base with
+// globalAlpha = pa*clamp(intensity,0,1) — matches canvas
+// `globalCompositeOperation="screen"` + `globalAlpha=intensity` over an
+// opaque base.
+const BLOOM_COMPOSITE_FRAG = f(`uniform sampler2D u_blurred;
+uniform float u_intensity;
+void main(){
+  vec4 base = texture(u_tex, v_uv);
+  vec4 src = texture(u_blurred, v_uv);
+  vec3 s = src.rgb/max(src.a,1e-6);
+  float effA = src.a*clamp(u_intensity,0.0,1.0);
+  vec3 screened = 1.0 - (1.0-base.rgb)*(1.0-s);
+  o = vec4(mix(base.rgb, screened, effA), base.a);
+}`);
+
+const BLOOM_FRAGS = [COPY_FRAG, BLOOM_BRIGHT_FRAG, BLOOM_GAUSS_FRAG, BLOOM_COMPOSITE_FRAG];
+
+function runBloomChain(ctx: MultiPassCtx, intensity: number, thr255: number, radius: number) {
+  if (intensity <= 0) {
+    ctx.run(COPY_FRAG, ctx.output, [{ name: "u_tex", tex: ctx.input.tex }]);
+    return;
+  }
+  const bright = ctx.temp("bright");
+  ctx.run(BLOOM_BRIGHT_FRAG, bright, [{ name: "u_tex", tex: ctx.input.tex }], (gl, prog) => {
+    gl.uniform1f(loc(gl, prog, "u_thr255"), thr255);
+  });
+  const { taps, step } = gaussTaps(radius);
+  const blurH = ctx.temp("blurH");
+  const blurV = ctx.temp("blurV");
+  const setGauss = (horiz: boolean) => (gl: WebGL2RenderingContext, prog: WebGLProgram) => {
+    gl.uniform1f(loc(gl, prog, "u_sigma"), radius);
+    gl.uniform1i(loc(gl, prog, "u_taps"), taps);
+    gl.uniform1f(loc(gl, prog, "u_step"), step);
+    gl.uniform1f(loc(gl, prog, "u_horiz"), horiz ? 1 : 0);
+  };
+  ctx.run(BLOOM_GAUSS_FRAG, blurH, [{ name: "u_tex", tex: bright.tex }], setGauss(true));
+  ctx.run(BLOOM_GAUSS_FRAG, blurV, [{ name: "u_tex", tex: blurH.tex }], setGauss(false));
+  ctx.run(
+    BLOOM_COMPOSITE_FRAG,
+    ctx.output,
+    [
+      { name: "u_tex", tex: ctx.input.tex },
+      { name: "u_blurred", tex: blurV.tex },
+    ],
+    (gl, prog) => {
+      gl.uniform1f(loc(gl, prog, "u_intensity"), intensity);
+    },
+  );
+}
+
+const bloom: GpuPass = {
+  frags: BLOOM_FRAGS,
+  multi: (ctx, p, u) => {
+    const intensity = pn(p, "intensity", 0.5);
+    const thr255 = pn(p, "threshold", 0.7) * 255;
+    const radius = Math.max(0.5, pn(p, "radius", 12) * u);
+    runBloomChain(ctx, intensity, thr255, radius);
+  },
+};
+
+const characterBloom: GpuPass = {
+  frags: BLOOM_FRAGS,
+  multi: (ctx, p, u) => {
+    const intensity = pn(p, "intensity", 0.7);
+    const thr255 = pn(p, "threshold", 0.55) * 255;
+    const radius = Math.max(0.5, pn(p, "radius", 6) * u);
+    runBloomChain(ctx, intensity, thr255, radius);
+  },
+};
+
 export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   grayscale,
   threshold,
@@ -861,4 +1221,7 @@ export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   grain,
   kuwahara,
   lineArt,
+  blur,
+  bloom,
+  characterBloom,
 };
