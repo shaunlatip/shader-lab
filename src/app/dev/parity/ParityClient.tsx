@@ -45,6 +45,10 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "dither", params: { type: "floydSteinberg" } }],
   },
   {
+    label: "Kuwahara · fast",
+    stack: [{ type: "kuwahara", params: {} }],
+  },
+  {
     label: "Kuwahara · smooth",
     stack: [{ type: "kuwahara", params: { quality: "smooth" } }],
   },

@@ -2,8 +2,8 @@
 // uniform setter; the engine runs them as single fragment passes over the
 // ping-pong chain. Ops NOT listed here (blur, bloom,
 // CMYK/error-diffusion dither, shaped pixelate, gradient maps with >8 stops,
-// and all glyph/converter styles) run through the CPU bridge instead — see
-// glEngine.shouldBridge.
+// and all glyph/converter styles except kuwahara) run through the CPU bridge
+// instead — see glEngine.shouldBridge.
 
 import type { EffectType, ParamValue } from "../../types";
 import { hexRGB, pb, pn, ps, pstops } from "../cpu/util";
@@ -587,6 +587,126 @@ void main(){
   },
 };
 
+// ---------------------------------------------------------------- kuwahara
+// Mirrors cpu/converters.ts `kuwahara` exactly (both quality modes in one
+// shader, uniform-branched — see u_smooth). Radius is hard-capped at
+// R_MAX=12 on the CPU side (setUniforms) before it ever reaches the shader;
+// R_MAX doubles as the constant loop bound GLSL needs to unroll the box scan.
+// Runtime radii below 12 are handled by an early `continue` per sample — the
+// loop still iterates the full (2*R_MAX+1)^2 box, but skipped samples cost no
+// texture read, which is where the quadratic blowup actually lives.
+// Sampling is pixel-space + CLAMP_TO_EDGE via idx clamp (same pattern as
+// crtCurvature/grain above), matching the CPU's clamp(x+dx,0,W-1) exactly.
+// fast: 4 overlapping quadrant sectors accumulated via explicit vec3 sums
+// (no dynamic array indexing needed — only 4 fixed sectors, if-chains).
+// smooth: 8 angular sectors over the disc, accumulated into local arrays
+// indexed by a loop-computed int — standard and portable in GLSL ES 3.00
+// fragment shaders (core WebGL2, no extension).
+// Both modes share the single box loop and the texture read per sample;
+// only the accumulation differs, branched on u_smooth.
+const kuwahara: GpuPass = {
+  frag: f(`const int R_MAX = 12;
+uniform int u_radius;   // 2..12 runtime
+uniform int u_smooth;   // 0 fast, 1 smooth
+// Octant of integer offset (x,y) == the CPU's min(7, floor(atan2(y,x)/45deg))
+// for every disc offset at R<=12 (verified exhaustively against f64). Integer
+// comparisons instead of atan: GPU atan is approximate, and disc offsets land
+// EXACTLY on the 45deg sector boundaries (axes + diagonals, ~22% of samples),
+// where a few-ULP atan error reassigns the sample to the neighbouring sector.
+int sectorOf(int x, int y){
+  if(y==0) return x>=0?0:4;
+  if(y>0){ if(x>0&&y<x)return 0; if(x>0)return 1; if(x==0)return 2; if(-x<y)return 2; return 3; }
+  if(x<0&&-y<-x)return 4; if(x<0)return 5; if(x==0)return 6; if(x<-y)return 6; return 7;
+}
+void main(){
+  // Integer pixel coords, top-left origin — CPU x,y. floor() is load-bearing:
+  // v_uv sits at pixel CENTRES, so without it idx lands on texel boundaries
+  // and LINEAR filtering blends two texels instead of reading one exactly.
+  vec2 px = floor(vec2(v_uv.x*u_dims.x, (1.0-v_uv.y)*u_dims.y));
+
+  // f32-exact statistics, matching the CPU's f64-on-integers to ~1e-7:
+  // (1) snap texels to exact 8-bit integers — v/255 is INEXACT in f32, and
+  //     that per-sample noise (~0.065 variance units at 255-scale) flips
+  //     near-tied sector picks across whole flat regions;
+  // (2) accumulate deviations from the centre pixel — integer deviations and
+  //     their squares stay < 2^24, so sums are EXACT in f32, and the
+  //     var = q/n - m*m cancellation never amplifies (both terms sit at the
+  //     variance's own magnitude). Variance is shift-invariant, mean = m'+c00.
+  vec3 c00 = floor(texture(u_tex, vec2((px.x+0.5)/u_dims.x, 1.0-(px.y+0.5)/u_dims.y)).rgb*255.0+0.5);
+
+  // fast-mode accumulators: s0=(-x,-y) s1=(+x,-y) s2=(-x,+y) s3=(+x,+y),
+  // matching CPU sectorStats(-R,0,-R,0) / (0,R,-R,0) / (-R,0,0,R) / (0,R,0,R).
+  vec3 s0=vec3(0.0), s1=vec3(0.0), s2=vec3(0.0), s3=vec3(0.0);
+  vec3 q0=vec3(0.0), q1=vec3(0.0), q2=vec3(0.0), q3=vec3(0.0); // sum of squares
+  float n0=0.0, n1=0.0, n2=0.0, n3=0.0;
+
+  // smooth-mode accumulators: 8 angular sectors over the disc.
+  vec3 ss[8]; vec3 sq[8]; float sn[8];
+  for(int i=0;i<8;i++){ ss[i]=vec3(0.0); sq[i]=vec3(0.0); sn[i]=0.0; }
+
+  for(int dy=-R_MAX; dy<=R_MAX; dy++){
+    for(int dx=-R_MAX; dx<=R_MAX; dx++){
+      if(abs(dx)>u_radius || abs(dy)>u_radius) continue;
+      float fx=float(dx), fy=float(dy);
+
+      if(u_smooth==0){
+        // fast: |dx|<=r,|dy|<=r box already guaranteed by the skip above.
+        bool inLeft  = dx<=0;
+        bool inRight = dx>=0;
+        bool inTop   = dy<=0;
+        bool inBot   = dy>=0;
+        vec2 idx = clamp(px+vec2(fx,fy), vec2(0.0), u_dims-1.0);
+        vec3 c = floor(texture(u_tex, vec2((idx.x+0.5)/u_dims.x, 1.0-(idx.y+0.5)/u_dims.y)).rgb*255.0+0.5) - c00;
+        if(inLeft && inTop)  { s0+=c; q0+=c*c; n0+=1.0; }
+        if(inRight && inTop) { s1+=c; q1+=c*c; n1+=1.0; }
+        if(inLeft && inBot)  { s2+=c; q2+=c*c; n2+=1.0; }
+        if(inRight && inBot) { s3+=c; q3+=c*c; n3+=1.0; }
+      } else {
+        if(dx*dx+dy*dy > u_radius*u_radius) continue;
+        int k = sectorOf(dx, dy);
+        vec2 idx = clamp(px+vec2(fx,fy), vec2(0.0), u_dims-1.0);
+        vec3 c = floor(texture(u_tex, vec2((idx.x+0.5)/u_dims.x, 1.0-(idx.y+0.5)/u_dims.y)).rgb*255.0+0.5) - c00;
+        for(int i=0;i<8;i++){
+          if(i==k){ ss[i]+=c; sq[i]+=c*c; sn[i]+=1.0; }
+        }
+      }
+    }
+  }
+
+  // Means are centre-relative (see c00 above): output = best + c00.
+  vec3 best; float bestVar;
+  if(u_smooth==0){
+    vec3 m0=s0/max(n0,1.0), v0=q0/max(n0,1.0)-m0*m0;
+    vec3 m1=s1/max(n1,1.0), v1=q1/max(n1,1.0)-m1*m1;
+    vec3 m2=s2/max(n2,1.0), v2=q2/max(n2,1.0)-m2*m2;
+    vec3 m3=s3/max(n3,1.0), v3=q3/max(n3,1.0)-m3*m3;
+    vec3 wl = vec3(0.299,0.587,0.114);
+    float var0=dot(v0,wl), var1=dot(v1,wl), var2=dot(v2,wl), var3=dot(v3,wl);
+    best=m0; bestVar=var0;
+    if(var1<bestVar){ best=m1; bestVar=var1; }
+    if(var2<bestVar){ best=m2; bestVar=var2; }
+    if(var3<bestVar){ best=m3; bestVar=var3; }
+  } else {
+    best=vec3(0.0); bestVar=3.4e38;
+    vec3 wl = vec3(0.299,0.587,0.114);
+    for(int k=0;k<8;k++){
+      if(sn[k]<1.0) continue;
+      vec3 m = ss[k]/sn[k];
+      vec3 v = sq[k]/sn[k] - m*m;
+      float variance = dot(v, wl);
+      if(variance<bestVar){ bestVar=variance; best=m; }
+    }
+  }
+  o = vec4(clamp((best + c00)/255.0, 0.0, 1.0), 1.0);
+}`),
+  setUniforms: (gl, prog, p, u) => {
+    const radius = Math.min(12, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
+    const smooth = ps(p, "quality", "fast") === "smooth" ? 1 : 0;
+    gl.uniform1i(loc(gl, prog, "u_radius"), radius);
+    gl.uniform1i(loc(gl, prog, "u_smooth"), smooth);
+  },
+};
+
 export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   grayscale,
   threshold,
@@ -604,4 +724,5 @@ export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   crtCurvature,
   gradientMap,
   grain,
+  kuwahara,
 };

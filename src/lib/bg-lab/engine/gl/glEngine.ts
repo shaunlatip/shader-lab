@@ -3,9 +3,10 @@
 // exact CPU letterboxing — then uploaded as the first texture. Each effect then
 // runs either as a GPU fragment pass (GL_OPS) over a ping-pong FBO chain, or, for
 // ops that don't shader cleanly (blur/bloom/CMYK+FS-dither/shaped-pixelate/
-// gradientMap with >8 stops + every glyph/converter style), through a CPU bridge:
-// blit the current texture out, run the existing CPU op, re-upload. Correct for
-// every op; GPU-accelerated for the portable ones.
+// gradientMap with >8 stops + every glyph/converter style except kuwahara,
+// which has its own GL pass — see shaders.ts), through a CPU bridge: blit the
+// current texture out, run the existing CPU op, re-upload. Correct for every
+// op; GPU-accelerated for the portable ones.
 
 import type { BgConfig, Dims, Effect, ParamValue } from "../../types";
 import { unit } from "../../resolution";
