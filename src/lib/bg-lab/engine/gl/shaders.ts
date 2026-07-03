@@ -1,6 +1,6 @@
 // BG Lab — GPU-native effect passes. Each entry is a fragment shader plus a
 // uniform setter; the engine runs them as single fragment passes over the
-// ping-pong chain. Ops NOT listed here (blur, bloom, grain,
+// ping-pong chain. Ops NOT listed here (blur, bloom,
 // CMYK/error-diffusion dither, shaped pixelate, gradient maps with >8 stops,
 // and all glyph/converter styles) run through the CPU bridge instead — see
 // glEngine.shouldBridge.
@@ -506,6 +506,87 @@ void main(){
   },
 };
 
+// ---------------------------------------------------------------- grain
+// Deterministic GPU counterpart to cpu/ops.ts `grain`. The CPU op is
+// stochastic (Math.random() per render), so pixel parity is impossible and
+// not the goal — this defines the deterministic preview spec instead: same
+// noise-grid cell size (nw x nh, computed CPU-side exactly like the CPU op),
+// same canvas-drawImage nearest/bilinear upscize semantics, same blend +
+// globalAlpha math. Noise comes from a well-mixed integer hash (not
+// fract(sin(dot(...))*C), which loses precision at large fragment coords).
+// u_frame drives a per-frame reseed when `animate` is on (24fps regrain,
+// matching the CPU op re-rolling Math.random() every render); animate=false
+// pins the seed to 0 for a stable still.
+const grain: GpuPass = {
+  frag: f(`uniform float u_amount; uniform float u_size; uniform vec2 u_nwh; uniform float u_mono; uniform int u_blend; uniform int u_frame;
+uint hash1(ivec2 p, int seed){
+  uint h = uint(p.x)*1664525u ^ uint(p.y)*1013904223u ^ uint(seed)*2654435761u;
+  h = (h ^ (h>>16u)) * 0x45d9f3bu;
+  h = (h ^ (h>>16u)) * 0x45d9f3bu;
+  h ^= (h>>16u);
+  return h;
+}
+float hashf(ivec2 p, int seed){ return float(hash1(p, seed)) / 4294967295.0; }
+// seed mixes the animate frame in via a golden-ratio scramble so consecutive
+// frames don't correlate; animate=false always passes u_frame=0.
+int seedFor(int channel){ int base = int(mod(float(u_frame)*0.61803398875, 1.0)*65536.0); return base + channel*7919; }
+vec3 cellNoise(ivec2 cell, ivec2 nwh){
+  ivec2 c = clamp(cell, ivec2(0), nwh-1);
+  if(u_mono>0.5){ float v=hashf(c, seedFor(0)); return vec3(v); }
+  return vec3(hashf(c, seedFor(0)), hashf(c, seedFor(1)), hashf(c, seedFor(2)));
+}
+vec3 blendMul(vec3 d,vec3 s){ return d*s; }
+vec3 blendScreen(vec3 d,vec3 s){ return 1.0-(1.0-d)*(1.0-s); }
+vec3 blendOverlay(vec3 d,vec3 s){ return mix(2.0*d*s, 1.0-2.0*(1.0-d)*(1.0-s), step(0.5,d)); }
+vec3 blendSoft(vec3 d,vec3 s){ return mix(2.0*d*s + d*d*(1.0-2.0*s), sqrt(d)*(2.0*s-1.0)+2.0*d*(1.0-s), step(0.5,s)); }
+vec3 hue2rgb(float h){ return clamp(abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0,0.0,1.0); }
+vec3 rgb2hsl(vec3 c){ float mx=max(max(c.r,c.g),c.b); float mn=min(min(c.r,c.g),c.b); float l=(mx+mn)*0.5; float h=0.0,s=0.0; float d=mx-mn;
+  if(d>1e-5){ s=l>0.5? d/(2.0-mx-mn): d/(mx+mn); if(mx==c.r) h=(c.g-c.b)/d+(c.g<c.b?6.0:0.0); else if(mx==c.g) h=(c.b-c.r)/d+2.0; else h=(c.r-c.g)/d+4.0; h/=6.0; } return vec3(h,s,l); }
+vec3 hsl2rgb(vec3 hsl){ float h=hsl.x,s=hsl.y,l=hsl.z; if(s<1e-5) return vec3(l); vec3 rgb=hue2rgb(h); float c=(1.0-abs(2.0*l-1.0))*s; return (rgb-0.5)*c+l; }
+vec3 blendColor(vec3 d,vec3 s){ vec3 ds=rgb2hsl(s); vec3 dd=rgb2hsl(d); return hsl2rgb(vec3(ds.x,ds.y,dd.z)); }
+void main(){
+  vec4 c=texture(u_tex,v_uv);
+  if(u_amount<=0.0){ o=c; return; }
+  ivec2 nwh = ivec2(u_nwh);
+  vec2 px = vec2(v_uv.x*u_dims.x, (1.0-v_uv.y)*u_dims.y); // dest pixel coords, top-left origin
+  vec3 nz;
+  if(u_size<=1.5){
+    // canvas NEAREST upscale: dest pixel centre -> source texel index
+    ivec2 cell = ivec2(floor((px+0.5)*u_nwh/u_dims));
+    nz = cellNoise(cell, nwh);
+  } else {
+    // canvas smoothed (bilinear) upscale: sample the 4 surrounding cell hashes
+    vec2 n = (px+0.5)*(u_nwh/u_dims) - 0.5;
+    vec2 nf = floor(n);
+    vec2 frac = n - nf;
+    ivec2 c00 = ivec2(nf);
+    vec3 v00 = cellNoise(c00, nwh);
+    vec3 v10 = cellNoise(c00+ivec2(1,0), nwh);
+    vec3 v01 = cellNoise(c00+ivec2(0,1), nwh);
+    vec3 v11 = cellNoise(c00+ivec2(1,1), nwh);
+    nz = mix(mix(v00,v10,frac.x), mix(v01,v11,frac.x), frac.y);
+  }
+  vec3 b;
+  if(u_blend==0) b=blendMul(c.rgb,nz); else if(u_blend==1) b=blendScreen(c.rgb,nz); else if(u_blend==2) b=blendOverlay(c.rgb,nz); else if(u_blend==4) b=blendColor(c.rgb,nz); else b=blendSoft(c.rgb,nz);
+  o=vec4(mix(c.rgb,b,u_amount),c.a);
+}`),
+  setUniforms: (gl, prog, p, u, t, dims) => {
+    const amount = pn(p, "amount", 0.14);
+    const size = Math.max(1, pn(p, "size", 1.5) * u);
+    const nw = Math.max(1, Math.round(dims.w / size));
+    const nh = Math.max(1, Math.round(dims.h / size));
+    const animate = pb(p, "animate", true);
+    const frame = animate ? Math.floor(t * 24) : 0;
+    gl.uniform1f(loc(gl, prog, "u_amount"), amount);
+    gl.uniform1f(loc(gl, prog, "u_size"), size);
+    gl.uniform2f(loc(gl, prog, "u_nwh"), nw, nh);
+    gl.uniform1f(loc(gl, prog, "u_mono"), pb(p, "mono", true) ? 1 : 0);
+    const blends: Record<string, number> = { multiply: 0, screen: 1, overlay: 2, "soft-light": 3, color: 4 };
+    gl.uniform1i(loc(gl, prog, "u_blend"), blends[ps(p, "blend", "soft-light")] ?? 3);
+    gl.uniform1i(loc(gl, prog, "u_frame"), frame);
+  },
+};
+
 export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   grayscale,
   threshold,
@@ -522,4 +603,5 @@ export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   halftone,
   crtCurvature,
   gradientMap,
+  grain,
 };

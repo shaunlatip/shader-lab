@@ -72,6 +72,10 @@ const TEST_CONFIGS: TestConfig[] = [
     label: "CRT curvature",
     stack: [{ type: "crtCurvature", params: {} }],
   },
+  {
+    label: "Grain (stochastic — stats only)",
+    stack: [{ type: "grain", params: {} }],
+  },
 ];
 
 function buildConfig(test: TestConfig): BgConfig {

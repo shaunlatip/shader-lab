@@ -2,7 +2,7 @@
 // (cover-fit source / solid) is composited on a 2D scratch canvas — reusing the
 // exact CPU letterboxing — then uploaded as the first texture. Each effect then
 // runs either as a GPU fragment pass (GL_OPS) over a ping-pong FBO chain, or, for
-// ops that don't shader cleanly (blur/bloom/grain/CMYK+FS-dither/shaped-pixelate/
+// ops that don't shader cleanly (blur/bloom/CMYK+FS-dither/shaped-pixelate/
 // gradientMap with >8 stops + every glyph/converter style), through a CPU bridge:
 // blit the current texture out, run the existing CPU op, re-upload. Correct for
 // every op; GPU-accelerated for the portable ones.

@@ -365,6 +365,7 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "amount", label: "Amount", min: 0, max: 0.7, step: 0.01, default: 0.14 },
       { kind: "slider", key: "size", label: "Size", min: 1, max: 6, step: 0.5, default: 1.5, unit: true },
       { kind: "switch", key: "mono", label: "Monochrome", default: true },
+      { kind: "switch", key: "animate", label: "Animate", default: true },
       { kind: "select", key: "blend", label: "Blend", options: BLENDS, default: "soft-light" },
     ],
   },
