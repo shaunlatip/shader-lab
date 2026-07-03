@@ -6,13 +6,18 @@ import { ArrayBufferTarget, Muxer } from "mp4-muxer";
 import { GIFEncoder, applyPalette, quantize } from "gifenc";
 
 export interface FrameEncoder {
-  addFrame: (canvas: HTMLCanvasElement) => void;
+  addFrame: (canvas: HTMLCanvasElement) => void | Promise<void>;
   finish: () => Promise<Blob> | Blob;
   /** release underlying resources (e.g. a live VideoEncoder) on error/abort */
   dispose: () => void;
   mime: string;
   ext: string;
 }
+
+// VideoEncoder queues encode() calls internally; letting it run unbounded ahead
+// of the frame loop balloons memory on long clips. Cap how far we let it get
+// ahead and wait for it to drain before handing over more frames.
+const MAX_ENCODE_QUEUE = 4;
 
 export function supportsMp4(): boolean {
   return typeof window !== "undefined" && "VideoEncoder" in window && "VideoFrame" in window;
@@ -68,7 +73,13 @@ export function createMp4Encoder(w: number, h: number, fps: number): FrameEncode
   return {
     mime: "video/mp4",
     ext: "mp4",
-    addFrame(canvas) {
+    async addFrame(canvas) {
+      if (encodeError) throw encodeError;
+      // Backpressure: don't let encode() queue run unbounded ahead of the frame
+      // loop. Wait for the encoder to dequeue before submitting more work.
+      while (encoder.encodeQueueSize > MAX_ENCODE_QUEUE) {
+        await new Promise<void>((res) => (encoder.ondequeue = () => res()));
+      }
       if (encodeError) throw encodeError;
       const frame = new VideoFrame(canvas, { timestamp: n * frameDur, duration: frameDur });
       encoder.encode(frame, { keyFrame: n % (fps * 2) === 0 });
@@ -91,19 +102,27 @@ export function createMp4Encoder(w: number, h: number, fps: number): FrameEncode
   };
 }
 
-/** Animated GIF encoder (256-colour palette per frame). */
+// Re-quantize every N frames instead of every frame: quantize() dominates
+// per-frame GIF cost, and reusing a palette across a short window is visually
+// fine for typical scene drift. N=24 is ~1s at typical export fps.
+const PALETTE_REFRESH_FRAMES = 24;
+
+/** Animated GIF encoder (256-colour palette, re-quantized every N frames). */
 export function createGifEncoder(w: number, h: number, fps: number): FrameEncoder {
   const gif = GIFEncoder();
   const delay = Math.round(1000 / fps);
+  let n = 0;
+  let palette: number[][] | null = null;
   return {
     mime: "image/gif",
     ext: "gif",
     addFrame(canvas) {
       const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
       const { data } = ctx.getImageData(0, 0, w, h);
-      const palette = quantize(data, 256);
+      if (!palette || n % PALETTE_REFRESH_FRAMES === 0) palette = quantize(data, 256);
       const index = applyPalette(data, palette);
       gif.writeFrame(index, w, h, { palette, delay });
+      n++;
     },
     finish() {
       gif.finish();

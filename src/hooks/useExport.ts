@@ -157,7 +157,7 @@ export function useExport() {
           engine.setSource(engineSource);
           engine.render(canvas, config, dims, t);
         }
-        enc.addFrame(canvas);
+        await enc.addFrame(canvas);
         setProgress((i + 1) / frames);
       }
       const blob = await enc.finish();
