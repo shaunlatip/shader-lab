@@ -295,7 +295,10 @@ export const lineArt: Op = (canvas, p, u) => {
   const thickness = clamp(pn(p, "thickness", 1.5) * u, 1, 40);
   const threshold = clamp(pn(p, "threshold", 0.5), 0, 1);
   const wiggleAmt = clamp(pn(p, "wiggle", 0), 0, 1);
-  const hatchSpacing = Math.max(2, pn(p, "hatchSpacing", 8) * u);
+  // Integer px: `y % s` on a fractional s is f32/f64-divergent (floor(y/s)
+  // flips near integers → whole hatch bands differ between engines); integer
+  // modulo is exact in both. Also crisper bands.
+  const hatchSpacing = Math.max(2, Math.round(pn(p, "hatchSpacing", 8) * u));
   const [inkR, inkG, inkB] = hexRGB(ps(p, "ink", "#16140f"));
   const [paperR, paperG, paperB] = hexRGB(ps(p, "paper", "#f1ece4"));
 

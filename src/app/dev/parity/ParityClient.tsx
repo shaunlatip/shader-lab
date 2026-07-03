@@ -80,6 +80,14 @@ const TEST_CONFIGS: TestConfig[] = [
     label: "Grain (stochastic — stats only)",
     stack: [{ type: "grain", params: {} }],
   },
+  {
+    label: "Line art · outline",
+    stack: [{ type: "lineArt", params: {} }],
+  },
+  {
+    label: "Line art · ink+hatch",
+    stack: [{ type: "lineArt", params: { mode: "ink", hatchSpacing: 6 } }],
+  },
 ];
 
 function buildConfig(test: TestConfig): BgConfig {
