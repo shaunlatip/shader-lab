@@ -408,6 +408,16 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         default: "radial",
       },
       { kind: "slider", key: "samples", label: "Samples", min: 1, max: 16, step: 1, default: 1 },
+      {
+        kind: "select",
+        key: "quality",
+        label: "Quality",
+        options: [
+          { value: "normal", label: "normal" },
+          { value: "high", label: "high" },
+        ],
+        default: "normal",
+      },
       { kind: "slider", key: "saturation", label: "Saturation", min: 0, max: 2, step: 0.01, default: 1 },
     ],
   },

@@ -198,29 +198,73 @@ void main(){ vec4 col4=texture(u_tex,v_uv); vec3 c=col4.rgb;
 };
 
 // ---------------------------------------------------------------- chromatic aberration / dispersion
+// Mirrors cpu/ops.ts `chromatic` exactly: integer pixel coords (not pixel
+// centres — see kuwahara/crtCurvature comments above for why floor() is
+// load-bearing), NEAREST source sample via the idx-clamp pattern (CPU's
+// clamp(Math.round(x),0,W-1)), and the same radial-dir ||1 guard, slide
+// schedule, and luma-preserving saturation mix. amt<=0 is a CPU early return
+// (no-op); mirrored here as a pass-through of the exact source texel.
+// quality "high" (u_quality==1) runs the 6-wavelength (rygcbv) dispersion —
+// same wavelength multipliers and pseudo-channel/reconstruction math as the
+// CPU high-quality branch. N_MAX=16 constant loop bound (GLSL ES 3.00
+// requires constant bounds); runtime sample count is a break, so no dynamic
+// unrolling is needed — up to 16*6=96 texture reads in high mode.
 const chromatic: GpuPass = {
-  frag: f(`uniform float u_amt; uniform float u_ax; uniform float u_ay; uniform float u_radial;
-uniform int u_samples; uniform float u_sat;
+  frag: f(`const int N_MAX = 16;
+uniform float u_amt; uniform float u_ax; uniform float u_ay; uniform float u_radial;
+uniform int u_samples; uniform float u_sat; uniform int u_quality;
+vec3 nearestTexel(vec2 samplePos){
+  vec2 idx=clamp(floor(samplePos+0.5), vec2(0.0), u_dims-1.0);
+  return texture(u_tex, vec2((idx.x+0.5)/u_dims.x, 1.0-(idx.y+0.5)/u_dims.y)).rgb;
+}
 void main(){
-  vec2 px=v_uv*u_dims;
+  vec2 px=floor(vec2(v_uv.x, 1.0-v_uv.y)*u_dims); // integer x,y (top-left origin), matches CPU loop
+  vec3 srcTexel=nearestTexel(px);
+  float srcAlpha=texture(u_tex,v_uv).a;
+  if(u_amt<=0.0){ o=vec4(srcTexel,srcAlpha); return; }
   vec2 bdir=vec2(u_ax,u_ay); // unit direction for split/linear mode
-  if(u_radial>0.5){ vec2 d=px-u_dims*0.5; bdir=d/max(1.0,length(d)); }
-  // multi-sample dispersion: R×1 G×2 B×3 per-channel multipliers
-  vec3 acc=vec3(0.0);
-  for(int i=0;i<16;i++){
-    if(i>=u_samples) break;
-    float slide=(float(i)/float(u_samples))*0.1;
-    float s=(u_amt+slide);
-    acc.r+=texture(u_tex,v_uv+bdir*s*1.0*u_texel).r;
-    acc.g+=texture(u_tex,v_uv+bdir*s*2.0*u_texel).g;
-    acc.b+=texture(u_tex,v_uv+bdir*s*3.0*u_texel).b;
+  if(u_radial>0.5){
+    vec2 d=px-u_dims*0.5;
+    float len=length(d);
+    bdir = len>0.0 ? d/len : d; // CPU: Math.hypot(dx,dy)||1 — at the exact centre pixel d is (0,0), dir stays (0,0)
   }
-  acc/=float(u_samples);
-  // saturation: mix(luma, rgb, u_sat) — luma-preserving
+  vec3 acc=vec3(0.0);
+  if(u_quality==1){
+    // 6-wavelength (rygcbv): r=1.0 y=1.4 g=1.8 c=2.2 b=2.6 v=3.0
+    float ra=0.0, ya=0.0, ga=0.0, ca=0.0, ba=0.0, va=0.0;
+    for(int i=0;i<N_MAX;i++){
+      if(i>=u_samples) break;
+      float slide=(float(i)/float(u_samples))*0.1;
+      float s=u_amt+slide;
+      vec3 rgb;
+      rgb=nearestTexel(px+bdir*s*1.0); ra+=rgb.r*0.5;
+      rgb=nearestTexel(px+bdir*s*1.4); ya+=(2.0*rgb.r+2.0*rgb.g-rgb.b)/6.0;
+      rgb=nearestTexel(px+bdir*s*1.8); ga+=rgb.g*0.5;
+      rgb=nearestTexel(px+bdir*s*2.2); ca+=(2.0*rgb.g+2.0*rgb.b-rgb.r)/6.0;
+      rgb=nearestTexel(px+bdir*s*2.6); ba+=rgb.b*0.5;
+      rgb=nearestTexel(px+bdir*s*3.0); va+=(2.0*rgb.b+2.0*rgb.r-rgb.g)/6.0;
+    }
+    float n=float(u_samples);
+    ra/=n; ya/=n; ga/=n; ca/=n; ba/=n; va/=n;
+    acc.r = ra + (2.0*va + 2.0*ya - ca)/3.0;
+    acc.g = ga + (2.0*ya + 2.0*ca - va)/3.0;
+    acc.b = ba + (2.0*ca + 2.0*va - ya)/3.0;
+  } else {
+    // multi-sample dispersion: R×1 G×2 B×3 per-channel multipliers
+    for(int i=0;i<N_MAX;i++){
+      if(i>=u_samples) break;
+      float slide=(float(i)/float(u_samples))*0.1;
+      float s=(u_amt+slide);
+      acc.r+=nearestTexel(px+bdir*s*1.0).r;
+      acc.g+=nearestTexel(px+bdir*s*2.0).g;
+      acc.b+=nearestTexel(px+bdir*s*3.0).b;
+    }
+    acc/=float(u_samples);
+  }
+  // saturation: mix(luma, rgb, u_sat) — luma-preserving; same formula as CPU
   float lum=luma601(acc);
-  vec3 rgb=mix(vec3(lum),acc,u_sat);
-  o=vec4(rgb,texture(u_tex,v_uv).a);
-  // future: rygcbv 6-wavelength expansion (quality:high) for finer dispersion
+  vec3 rgb=clamp(lum+(acc-vec3(lum))*u_sat, 0.0, 1.0);
+  o=vec4(rgb,srcAlpha);
 }`),
   setUniforms: (gl, prog, p, u) => {
     const mode = ps(p, "mode", "radial");
@@ -231,6 +275,7 @@ void main(){
     gl.uniform1f(loc(gl, prog, "u_radial"), mode === "radial" ? 1 : 0);
     gl.uniform1i(loc(gl, prog, "u_samples"), Math.max(1, Math.round(pn(p, "samples", 1))));
     gl.uniform1f(loc(gl, prog, "u_sat"), pn(p, "saturation", 1));
+    gl.uniform1i(loc(gl, prog, "u_quality"), ps(p, "quality", "normal") === "high" ? 1 : 0);
   },
 };
 

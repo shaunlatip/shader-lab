@@ -445,6 +445,10 @@ const tint: Op = (canvas, p) => {
 };
 
 // ---------------------------------------------------------------- chromatic aberration / dispersion
+// quality "high" runs a 6-wavelength (rygcbv) dispersion instead of the normal
+// 3-channel (RGB) one — see GL `chromatic` pass in shaders.ts for the mirrored
+// spec (same wavelength multipliers, same pseudo-channel math, same
+// reconstruction). Normal-mode path is unchanged from before quality existed.
 const chromatic: Op = (canvas, p, u) => {
   const amt = pn(p, "amount", 4) * u;
   if (amt <= 0) return;
@@ -453,6 +457,7 @@ const chromatic: Op = (canvas, p, u) => {
   const angle = mode === "split" ? 0 : (pn(p, "angle", 0) * Math.PI) / 180;
   const N = Math.max(1, Math.round(pn(p, "samples", 1)));
   const sat = pn(p, "saturation", 1);
+  const high = ps(p, "quality", "normal") === "high";
   const { ctx, img, d, W, H } = getData(canvas);
   const src = new Uint8ClampedArray(d);
   const cx = W / 2, cy = H / 2;
@@ -461,6 +466,74 @@ const chromatic: Op = (canvas, p, u) => {
     const xi = clamp(Math.round(x), 0, W - 1), yi = clamp(Math.round(y), 0, H - 1);
     return src[(yi * W + xi) * 4 + k] / 255;
   };
+  const sampleRGB = (x: number, y: number) => {
+    const xi = clamp(Math.round(x), 0, W - 1), yi = clamp(Math.round(y), 0, H - 1);
+    const pi = (yi * W + xi) * 4;
+    return [src[pi] / 255, src[pi + 1] / 255, src[pi + 2] / 255] as const;
+  };
+  // hoisted per-slide offsets: (amt+slide) doesn't depend on the pixel, so
+  // precompute once per N rather than recomputing per pixel in the inner loop.
+  const slides = new Array<number>(N);
+  for (let i = 0; i < N; i++) slides[i] = amt + (i / N) * 0.1;
+  if (high) {
+    // 6-wavelength (rygcbv) multipliers: r..v spans the same 1..3 range as
+    // the normal mode's R×1/G×2/B×3, subdivided into 6 steps.
+    const MULT = [1.0, 1.4, 1.8, 2.2, 2.6, 3.0]; // r y g c b v
+    const off = new Array<number>(N * 6);
+    for (let i = 0; i < N; i++) for (let w = 0; w < 6; w++) off[i * 6 + w] = slides[i] * MULT[w];
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        let bx = ax, by = ay;
+        if (radial) {
+          const dx = x - cx, dy = y - cy, len = Math.hypot(dx, dy) || 1;
+          bx = dx / len; by = dy / len;
+        }
+        let ra = 0, ya = 0, ga = 0, ca = 0, ba = 0, va = 0;
+        for (let i = 0; i < N; i++) {
+          const base = i * 6;
+          let s = off[base + 0];
+          let rgb = sampleRGB(x + bx * s, y + by * s);
+          ra += rgb[0] / 2;
+          s = off[base + 1];
+          rgb = sampleRGB(x + bx * s, y + by * s);
+          ya += (2 * rgb[0] + 2 * rgb[1] - rgb[2]) / 6;
+          s = off[base + 2];
+          rgb = sampleRGB(x + bx * s, y + by * s);
+          ga += rgb[1] / 2;
+          s = off[base + 3];
+          rgb = sampleRGB(x + bx * s, y + by * s);
+          ca += (2 * rgb[1] + 2 * rgb[2] - rgb[0]) / 6;
+          s = off[base + 4];
+          rgb = sampleRGB(x + bx * s, y + by * s);
+          ba += rgb[2] / 2;
+          s = off[base + 5];
+          rgb = sampleRGB(x + bx * s, y + by * s);
+          va += (2 * rgb[2] + 2 * rgb[0] - rgb[1]) / 6;
+        }
+        ra /= N; ya /= N; ga /= N; ca /= N; ba /= N; va /= N;
+        const ar = ra + (2 * va + 2 * ya - ca) / 3;
+        const ag = ga + (2 * ya + 2 * ca - va) / 3;
+        const ab = ba + (2 * ca + 2 * va - ya) / 3;
+        const lum = luma601(ar * 255, ag * 255, ab * 255) / 255;
+        const fr = lum + (ar - lum) * sat;
+        const fg = lum + (ag - lum) * sat;
+        const fb = lum + (ab - lum) * sat;
+        const pi = (y * W + x) * 4;
+        d[pi]     = clamp(Math.round(fr * 255), 0, 255);
+        d[pi + 1] = clamp(Math.round(fg * 255), 0, 255);
+        d[pi + 2] = clamp(Math.round(fb * 255), 0, 255);
+        // alpha unchanged (d[pi+3] stays from original ImageData)
+      }
+    ctx.putImageData(img, 0, 0);
+    return;
+  }
+  // normal mode: multi-sample dispersion, R×1 G×2 B×3 per-channel multipliers
+  const rOff = new Array<number>(N), gOff = new Array<number>(N), bOff = new Array<number>(N);
+  for (let i = 0; i < N; i++) {
+    rOff[i] = slides[i] * 1;
+    gOff[i] = slides[i] * 2;
+    bOff[i] = slides[i] * 3;
+  }
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
       let bx = ax, by = ay; // base unit direction
@@ -471,10 +544,9 @@ const chromatic: Op = (canvas, p, u) => {
       // multi-sample dispersion: R×1 G×2 B×3 per-channel multipliers
       let ar = 0, ag = 0, ab = 0;
       for (let i = 0; i < N; i++) {
-        const slide = (i / N) * 0.1;
-        ar += sampleCh(x + bx * (amt + slide) * 1, y + by * (amt + slide) * 1, 0);
-        ag += sampleCh(x + bx * (amt + slide) * 2, y + by * (amt + slide) * 2, 1);
-        ab += sampleCh(x + bx * (amt + slide) * 3, y + by * (amt + slide) * 3, 2);
+        ar += sampleCh(x + bx * rOff[i], y + by * rOff[i], 0);
+        ag += sampleCh(x + bx * gOff[i], y + by * gOff[i], 1);
+        ab += sampleCh(x + bx * bOff[i], y + by * bOff[i], 2);
       }
       ar /= N; ag /= N; ab /= N;
       // saturation: mix(luma, rgb, sat) — luma-preserving; luma601 expects 0..255 but we're 0..1 so scale
@@ -489,7 +561,6 @@ const chromatic: Op = (canvas, p, u) => {
       // alpha unchanged (d[pi+3] stays from original ImageData)
     }
   ctx.putImageData(img, 0, 0);
-  // future: rygcbv 6-wavelength expansion (quality:high) for finer dispersion
 };
 
 // ---------------------------------------------------------------- scanlines / CRT

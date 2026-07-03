@@ -170,11 +170,16 @@ then S each)*
 
 ## Sequence summary
 
-| Order | What | Gate | Size |
-|---|---|---|---|
-| P0 | honesty + hygiene (7 items) | — | ~1 day |
-| P1 | grain, gradientMap, kuwahara, lineArt, crt GL passes | P0.1 harness | ~2–3 days |
-| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days |
-| P3 | F5a → blur/XDoG; F5b → bloom; F6+aniso-Kuwahara | F5a/b/6 | ~3–5 days |
-| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked |
-| ∥ | export track (GIF palette, MP4 backpressure, worker) | — | interleave |
+| Order | What | Gate | Size | Status (2026-07-03 overnight) |
+|---|---|---|---|---|
+| P0 | honesty + hygiene (7 items) | — | ~1 day | ✅ shipped (PR #4) |
+| P1 | grain, gradientMap, kuwahara, lineArt, crt GL passes | P0.1 harness | ~2–3 days | ✅ all 5 + halftone parity fix. Bench: kuwahara smooth 2790×, lineArt 724×, crt 60×, grain 47×, gradientMap 44× |
+| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days | ✅ F4 + blue-noise (0.00 parity; shared TS module, not PNG). ASCII atlas deferred → per-effect quality pass |
+| P3 | F5a → blur/XDoG; F5b → bloom; F6+aniso-Kuwahara | F5a/b/6 | ~3–5 days | ✅ F5a + blur(4 modes)/bloom/characterBloom. F5b pyramid skipped (full-res separable already >60fps); XDoG + F6/aniso still open |
+| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked | ◐ overflow+gooey shipped (1.00 parity); chromatic upgrade in flight; creative-medium singles + SDF patterns open |
+| ∥ | export track (GIF palette, MP4 backpressure, worker) | — | interleave | next up |
+
+Post-P3 bridge status: every op in the preset library runs GPU-side except the
+by-design CPU composites (braille/mosaic/lego/glitch/filmDust, error-diffusion
+dither, shaped pixelate, >8-stop gradientMap). Known accepted divergences and
+the CPU blur-family edge-alpha quirk are documented in the P1/P3 commits.

@@ -108,6 +108,14 @@ const TEST_CONFIGS: TestConfig[] = [
     label: "Bloom",
     stack: [{ type: "bloom", params: {} }],
   },
+  {
+    label: "Chromatic · radial x8",
+    stack: [{ type: "chromatic", params: { samples: 8, amount: 6 } }],
+  },
+  {
+    label: "Chromatic · high quality",
+    stack: [{ type: "chromatic", params: { quality: "high", samples: 4, amount: 6 } }],
+  },
 ];
 
 function buildConfig(test: TestConfig): BgConfig {
