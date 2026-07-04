@@ -170,14 +170,14 @@ then S each)*
 
 ## Sequence summary
 
-| Order | What | Gate | Size | Status (2026-07-03 overnight) |
+| Order | What | Gate | Size | Status (2026-07-04 follow-up pass) |
 |---|---|---|---|---|
 | P0 | honesty + hygiene (7 items) | — | ~1 day | ✅ shipped (PR #4) |
 | P1 | grain, gradientMap, kuwahara, lineArt, crt GL passes | P0.1 harness | ~2–3 days | ✅ all 5 + halftone parity fix. Bench: kuwahara smooth 2790×, lineArt 724×, crt 60×, grain 47×, gradientMap 44× |
-| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days | ✅ F4 + blue-noise (0.00 parity; shared TS module, not PNG). ASCII atlas deferred → per-effect quality pass |
-| P3 | F5a → blur/XDoG; F5b → bloom; F6+aniso-Kuwahara | F5a/b/6 | ~3–5 days | ✅ F5a + blur(4 modes)/bloom/characterBloom. F5b pyramid skipped (full-res separable already >60fps); XDoG + F6/aniso still open |
-| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked | ◐ overflow+gooey shipped (1.00 parity); chromatic upgrade in flight; creative-medium singles + SDF patterns open |
-| ∥ | export track (GIF palette, MP4 backpressure, worker) | — | interleave | next up |
+| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days | ✅ F4 + blue-noise (0.00 parity; shared TS module, not PNG). ASCII atlas still open (item 5 of the follow-up pass) |
+| P3 | F5a → blur/XDoG; F5b → bloom; F6+aniso-Kuwahara | F5a/b/6 | ~3–5 days | ✅ F5a + blur(4 modes)/bloom/characterBloom. ✅ XDoG shipped 2026-07-04 (sharpened Winnemöller, max 1/255 parity, 16-bit packed RGBA8 temps). ✅ CPU blur edge-alpha fixed (opaquify; minAlphaCpu 255 all modes). F5b pyramid skipped; F6/aniso deferred (needs new foundation) |
+| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked | ◐ overflow+gooey + chromatic shipped overnight. ✅ patterns 2026-07-04: moire/hex/truchet/voronoi/fbm as CPU pattern-source draws (GL SDF variant gated on a pattern-drift feature that doesn't exist — no dead code). Creative-medium singles in flight |
+| ∥ | export track (GIF palette, MP4 backpressure, worker) | — | interleave | ✅ complete 2026-07-04: still export runs in a Worker (OffscreenCanvas; engine worker-compat via tmpCanvas fallback), verified live |
 
 Post-P3 bridge status: every op in the preset library runs GPU-side except the
 by-design CPU composites (braille/mosaic/lego/glitch/filmDust, error-diffusion
