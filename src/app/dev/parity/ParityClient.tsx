@@ -97,6 +97,10 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "lineArt", params: { mode: "ink", hatchSpacing: 6 } }],
   },
   {
+    label: "Line art · XDoG",
+    stack: [{ type: "lineArt", params: { mode: "xdog" } }],
+  },
+  {
     label: "Blur · gaussian",
     stack: [{ type: "blur", params: { radius: 8 } }],
   },

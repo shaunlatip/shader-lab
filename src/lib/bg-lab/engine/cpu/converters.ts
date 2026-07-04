@@ -287,13 +287,121 @@ export const mosaic: Op = (canvas, p, u) => {
   }
 };
 
+// ---------------------------------------------------------------- lineArt · XDoG
+// Winnemöller extended difference-of-gaussians, the SHARPENED form:
+//   S = (1+p)*G_sigma - p*G_{k*sigma}   (k=1.6, p=20 fixed sharpen weight)
+//   E = 1 if S >= eps else 1 + tanh(phi*(S - eps));  color = mix(ink,paper,E)
+// The plain D = G1 - tau*G2 form compresses flat regions to ~0.01*luma, below
+// any usable eps — the whole image renders mid-grey. The sharpened form keeps
+// S at luma scale (flat region: S = luma), so eps acts as a tone threshold
+// (bright -> paper, dark -> ink) with DoG edge emphasis on top — the canonical
+// XDoG sketch look. Two full H+V separable gaussian passes over a Float32Array
+// luma plane, hoisted buffers (no per-pixel allocs). R_MAX=48 mirrors the GL
+// pass's constant loop bound (GLSL needs a compile-time bound; the CPU op
+// doesn't strictly need the cap but matches it 1:1 for parity/readability).
+const XDOG_R_MAX = 48;
+const XDOG_K = 1.6; // fixed size ratio between the two gaussians
+const XDOG_P = 20; // fixed sharpen weight: S = (1+p)*G1 - p*G2
+
+// Separable gaussian blur of a Float32Array plane (W×H, single channel).
+// weights w(i) = exp(-i^2/(2*sigma^2)) for i in -R..R, normalized to sum 1;
+// samples clamped to bounds (matches GL's texelAt clamp-to-edge reads).
+function gaussianBlur1ch(src: Float32Array, W: number, H: number, sigma: number, tmp: Float32Array, dst: Float32Array) {
+  const R = Math.min(XDOG_R_MAX, Math.ceil(3 * sigma));
+  const weights = new Float32Array(2 * R + 1);
+  let wsum = 0;
+  for (let i = -R; i <= R; i++) {
+    const w = Math.exp(-(i * i) / (2 * sigma * sigma));
+    weights[i + R] = w;
+    wsum += w;
+  }
+  for (let i = 0; i < weights.length; i++) weights[i] /= wsum;
+
+  // horizontal pass: src -> tmp
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      let acc = 0;
+      for (let i = -R; i <= R; i++) {
+        const xi = clamp(x + i, 0, W - 1);
+        acc += src[row + xi] * weights[i + R];
+      }
+      tmp[row + x] = acc;
+    }
+  }
+  // vertical pass: tmp -> dst
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let acc = 0;
+      for (let i = -R; i <= R; i++) {
+        const yi = clamp(y + i, 0, H - 1);
+        acc += tmp[yi * W + x] * weights[i + R];
+      }
+      dst[y * W + x] = acc;
+    }
+  }
+}
+
+function lineArtXdog(canvas: HTMLCanvasElement, p: Record<string, ParamValue>, u: number) {
+  const sigma = clamp(pn(p, "sigma", 2), 0.5, 8) * u;
+  // threshold slider [0,1] default 0.5 is REUSED as the tone threshold via
+  // eps = 0.2 + threshold*0.8 (default 0.5 -> eps 0.6, luma-scale — see the
+  // sharpened-form comment above). Documented identically in the GL pass.
+  const eps = 0.2 + clamp(pn(p, "threshold", 0.5), 0, 1) * 0.8;
+  const phi = clamp(pn(p, "edgeSoftness", 10), 1, 40); // = φ, the tanh soft-knee gain
+  const [inkR, inkG, inkB] = hexRGB(ps(p, "ink", "#16140f"));
+  const [paperR, paperG, paperB] = hexRGB(ps(p, "paper", "#f1ece4"));
+
+  const W = canvas.width, H = canvas.height;
+  const snap = tmpCanvas(canvas, W, H);
+  const snapCtx = ctx2d(snap);
+  snapCtx.drawImage(canvas, 0, 0);
+  const src = snapCtx.getImageData(0, 0, W, H).data;
+
+  const N = W * H;
+  const lumaPlane = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const j = i * 4;
+    lumaPlane[i] = luma601(src[j], src[j + 1], src[j + 2]) / 255;
+  }
+
+  const tmp = new Float32Array(N);
+  const blurSigma = new Float32Array(N);
+  const blurKSigma = new Float32Array(N);
+  gaussianBlur1ch(lumaPlane, W, H, sigma, tmp, blurSigma);
+  gaussianBlur1ch(lumaPlane, W, H, sigma * XDOG_K, tmp, blurKSigma);
+
+  const ctx = ctx2d(canvas);
+  const d = new Uint8ClampedArray(N * 4);
+  for (let i = 0; i < N; i++) {
+    const S = (1 + XDOG_P) * blurSigma[i] - XDOG_P * blurKSigma[i];
+    const x = S >= eps ? 1 : 1 + Math.tanh(phi * (S - eps));
+    const j = i * 4;
+    d[j] = inkR + (paperR - inkR) * x;
+    d[j + 1] = inkG + (paperG - inkG) * x;
+    d[j + 2] = inkB + (paperB - inkB) * x;
+    d[j + 3] = 255;
+  }
+
+  const out = ctx.createImageData(W, H);
+  out.data.set(d);
+  ctx.putImageData(out, 0, 0);
+}
+
 // ---------------------------------------------------------------- lineArt
 // Sobel-on-luma edge detector with outline, crosshatch, and combined ink modes.
 // Reads from a snapshot so Sobel never reads its own writes.
 export const lineArt: Op = (canvas, p, u) => {
   const mode = ps(p, "mode", "outline");
+  if (mode === "xdog") {
+    lineArtXdog(canvas, p, u);
+    return;
+  }
   const thickness = clamp(pn(p, "thickness", 1.5) * u, 1, 40);
   const threshold = clamp(pn(p, "threshold", 0.5), 0, 1);
+  // wiggle intentionally ignored for xdog (handled above, doesn't reach here) —
+  // xdog's gaussians already soften/stylize strokes, so a stochastic per-pixel
+  // sample-coordinate wiggle would just add noise on top of noise.
   const wiggleAmt = clamp(pn(p, "wiggle", 0), 0, 1);
   // Integer px: `y % s` on a fractional s is f32/f64-divergent (floor(y/s)
   // flips near integers → whole hatch bands differ between engines); integer

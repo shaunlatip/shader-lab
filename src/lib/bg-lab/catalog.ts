@@ -636,13 +636,18 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
           { value: "outline", label: "outline" },
           { value: "hatch", label: "hatch" },
           { value: "ink", label: "ink" },
+          { value: "xdog", label: "XDoG" },
         ],
         default: "outline",
       },
       { kind: "slider", key: "thickness", label: "Thickness", min: 1, max: 4, step: 0.1, default: 1.5, unit: true },
+      // Reused by xdog mode as epsilon = threshold * 0.1 (default 0.5 -> eps 0.05).
       { kind: "slider", key: "threshold", label: "Threshold", min: 0, max: 1, step: 0.01, default: 0.5 },
       { kind: "slider", key: "wiggle", label: "Wiggle", min: 0, max: 1, step: 0.01, default: 0 },
       { kind: "slider", key: "hatchSpacing", label: "Hatch spacing", min: 4, max: 16, step: 1, default: 8, unit: true },
+      // xdog-only params: gaussian sigma (unit-scaled) and the tanh soft-knee gain (phi).
+      { kind: "slider", key: "sigma", label: "XDoG sigma", min: 0.5, max: 8, step: 0.1, default: 2, unit: true },
+      { kind: "slider", key: "edgeSoftness", label: "XDoG edge softness", min: 1, max: 40, step: 0.5, default: 10 },
       { kind: "color", key: "ink", label: "Ink", default: "#16140f" },
       { kind: "color", key: "paper", label: "Paper", default: "#f1ece4" },
     ],
