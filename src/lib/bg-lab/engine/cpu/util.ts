@@ -39,11 +39,18 @@ export const pstops = (p: Record<string, ParamValue>, k: string): GradientStop[]
   Array.isArray(p[k]) ? (p[k] as GradientStop[]) : [];
 
 // --- canvas temps (use the target's ownerDocument so it works in any DOM) ---
+// In a worker (still-export path) the ref is an OffscreenCanvas: no
+// ownerDocument, no global document — allocate an OffscreenCanvas instead.
+// The 2D surface APIs the ops use are identical, so downstream code keeps the
+// HTMLCanvasElement type.
 export function tmpCanvas(ref: HTMLCanvasElement, w: number, h: number): HTMLCanvasElement {
-  const doc = ref.ownerDocument || document;
+  const W = Math.max(1, Math.round(w));
+  const H = Math.max(1, Math.round(h));
+  const doc = ref.ownerDocument || (typeof document === "undefined" ? null : document);
+  if (!doc) return new OffscreenCanvas(W, H) as unknown as HTMLCanvasElement;
   const c = doc.createElement("canvas");
-  c.width = Math.max(1, Math.round(w));
-  c.height = Math.max(1, Math.round(h));
+  c.width = W;
+  c.height = H;
   return c;
 }
 export const ctx2d = (c: HTMLCanvasElement) =>
