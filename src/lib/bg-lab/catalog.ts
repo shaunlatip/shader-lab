@@ -407,7 +407,9 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         ],
         default: "radial",
       },
-      { kind: "slider", key: "samples", label: "Samples", min: 1, max: 16, step: 1, default: 1 },
+      // default 6 since the GL pass landed — multi-sample is free on GPU and
+      // the smeared dispersion reads much better than the hard 1-sample split
+      { kind: "slider", key: "samples", label: "Samples", min: 1, max: 16, step: 1, default: 6 },
       {
         kind: "select",
         key: "quality",
@@ -660,7 +662,9 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
           { value: "fast", label: "fast" },
           { value: "smooth", label: "smooth" },
         ],
-        default: "fast",
+        // smooth is the better look and costs the same on the GL pass
+        // (0.083 ms/frame); the CPU engine only pays it on still export
+        default: "smooth",
       },
       { kind: "slider", key: "radius", label: "Radius", min: 2, max: 12, step: 1, default: 4, unit: true },
     ],

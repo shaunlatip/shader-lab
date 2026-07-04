@@ -3,7 +3,7 @@
 import { nanoid } from "nanoid";
 import type { BgConfig, Effect, SourceState } from "./types";
 import { EFFECT_CATALOG } from "./catalog";
-import { GALLERY, PRESETS } from "./presets";
+import { GALLERY, PRESETS, type PresetGroup } from "./presets";
 
 /** A named, reusable effect stack. `builtin` ones ship with the app. */
 export interface SavedEffect {
@@ -11,6 +11,8 @@ export interface SavedEffect {
   name: string;
   stack: Effect[];
   builtin?: boolean;
+  /** Section header for builtins (user saves have none). */
+  group?: PresetGroup;
 }
 
 /** A named snapshot of the whole editor (source + output + stack). */
@@ -25,7 +27,7 @@ export const DRAFTS_KEY = "bg-lab/drafts/v1";
 
 /** Built-in preset looks, materialized as saved effects. */
 export function builtinSaved(): SavedEffect[] {
-  return PRESETS.map((p, i) => ({ id: `builtin-${i}`, name: p.name, stack: p.build(), builtin: true }));
+  return PRESETS.map((p, i) => ({ id: `builtin-${i}`, name: p.name, stack: p.build(), builtin: true, group: p.group }));
 }
 
 /** Fresh ids + cloned params so a loaded stack is independent of the stored one. */

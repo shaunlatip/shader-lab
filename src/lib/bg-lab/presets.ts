@@ -75,8 +75,22 @@ export function makeDefaultConfig(): BgConfig {
 
 export interface Preset {
   name: string;
+  /** Section header in the Saved panel — turns the 40+ flat chip wall into
+   * scannable clusters. Every preset belongs to exactly one group. */
+  group: PresetGroup;
   build: () => Effect[];
 }
+
+export const PRESET_GROUPS = [
+  "Pixel & tiles",
+  "Print & dither",
+  "Painterly & ink",
+  "Type & glyphs",
+  "Retro screen",
+  "Warp & texture",
+  "Grades",
+] as const;
+export type PresetGroup = (typeof PRESET_GROUPS)[number];
 
 /** Tweak one effect's params inline while building a preset. */
 function withParams(type: EffectType, params: Record<string, ParamValue>): Effect {
@@ -97,8 +111,12 @@ const STYLE_LOOKS: (() => Effect)[] = [
   () => withParams("mosaic", { size: 18, gap: 0.1 }),
   () => withParams("lego", { size: 22 }),
   () => withParams("halftone", { cell: 8, mode: "mono" }),
+  () => withParams("halftone", { cell: 12, gooey: 0.75, overflow: 0.3 }),
   () => withParams("dither", { type: "bayer4", levels: 3 }),
+  () => withParams("dither", { type: "blueNoise", levels: 2, mono: true }),
   () => withParams("diamond", { cell: 12, colorMode: "source", background: "original", charOpacity: 0.85 }),
+  () => withParams("kuwahara", { quality: "smooth", radius: 6 }),
+  () => withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }),
 ];
 const MOOD_POST: (() => Effect)[] = [
   () => withParams("grain", { amount: 0.14 }),
@@ -148,42 +166,239 @@ export function inspire(): BgConfig {
 }
 
 // Curated looks distilled from the effect explorations. Applying a preset
-// replaces the current stack (source + output are kept).
+// replaces the current stack (source + output are kept). Ordered by group;
+// the Saved panel renders one labeled cluster per group.
 export const PRESETS: Preset[] = [
+  // --- Pixel & tiles ---
   {
     name: "Pixel + grain",
+    group: "Pixel & tiles",
     build: () => [withParams("pixelate", { size: 14 }), withParams("grain", { amount: 0.18 })],
   },
   {
+    name: "Pixel dots",
+    group: "Pixel & tiles",
+    build: () => [withParams("pixelate", { size: 22, shape: "circle" }), withParams("grain", { amount: 0.12 })],
+  },
+  {
+    name: "Pixel diamonds",
+    group: "Pixel & tiles",
+    build: () => [withParams("pixelate", { size: 24, shape: "diamond" })],
+  },
+  {
+    name: "Mosaic tiles",
+    group: "Pixel & tiles",
+    build: () => [withParams("mosaic", { size: 22, gap: 0.12 })],
+  },
+  {
+    name: "LEGO",
+    group: "Pixel & tiles",
+    build: () => [withParams("lego", { size: 24 })],
+  },
+  // --- Print & dither ---
+  {
     name: "Newsprint",
+    group: "Print & dither",
     build: () => [makeEffect("grayscale"), withParams("halftone", { cell: 8, mode: "mono", aa: true })],
   },
   {
     name: "CMYK print",
+    group: "Print & dither",
     build: () => [withParams("halftone", { cell: 9, mode: "cmyk", aa: true })],
   },
   {
+    name: "Halftone rings",
+    group: "Print & dither",
+    build: () => [makeEffect("grayscale"), withParams("halftone", { cell: 12, mode: "mono", dotShape: "ring" })],
+  },
+  {
+    name: "Gooey halftone",
+    group: "Print & dither",
+    build: () => [withParams("halftone", { cell: 12, gooey: 0.75, overflow: 0.3 })],
+  },
+  {
     name: "Floyd dither",
+    group: "Print & dither",
     build: () => [withParams("dither", { type: "floydSteinberg", levels: 2, mono: true })],
   },
   {
     name: "Blue noise",
+    group: "Print & dither",
     build: () => [withParams("dither", { type: "blueNoise", levels: 2, mono: true })],
   },
   {
+    name: "Bayer dither",
+    group: "Print & dither",
+    build: () => [withParams("dither", { type: "bayer4", levels: 2, mono: true })],
+  },
+  {
+    name: "Coarse Bayer",
+    group: "Print & dither",
+    build: () => [withParams("dither", { type: "bayer8", levels: 2, scale: 3, mono: true })],
+  },
+  {
+    name: "Floyd colour",
+    group: "Print & dither",
+    build: () => [withParams("dither", { type: "floydSteinberg", levels: 3, mono: false })],
+  },
+  {
+    name: "Threshold ink",
+    group: "Print & dither",
+    build: () => [withParams("threshold", { level: 0.5 }), withParams("grain", { amount: 0.1 })],
+  },
+  {
     name: "Risograph",
+    group: "Print & dither",
     build: () => [
       withParams("posterize", { levels: 4 }),
       makeEffect("gradientMap"),
       withParams("grain", { amount: 0.22, blend: "multiply" }),
     ],
   },
+  // --- Painterly & ink (the GPU-heavy looks — all realtime post-P1/P3) ---
   {
-    name: "Sepia film",
-    build: () => [makeEffect("gradientMap"), withParams("grain", { amount: 0.16 }), withParams("vignette", { amount: 0.5 })],
+    name: "Oil paint",
+    group: "Painterly & ink",
+    build: () => [withParams("kuwahara", { quality: "smooth", radius: 6 }), withParams("adjust", { saturation: 1.15, contrast: 1.05 })],
   },
   {
+    name: "Ink sketch",
+    group: "Painterly & ink",
+    build: () => [withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }), withParams("grain", { amount: 0.06 })],
+  },
+  {
+    name: "Soft focus",
+    group: "Painterly & ink",
+    build: () => [withParams("blur", { radius: 10 }), withParams("bloom", { intensity: 0.6, threshold: 0.65 })],
+  },
+  {
+    name: "Bloom",
+    group: "Painterly & ink",
+    build: () => [withParams("adjust", { contrast: 1.15, saturation: 1.2 }), withParams("bloom", { intensity: 0.8, threshold: 0.6 })],
+  },
+  {
+    name: "Poster pop",
+    group: "Painterly & ink",
+    build: () => [withParams("posterize", { levels: 5, perChannel: true }), withParams("adjust", { saturation: 1.4, contrast: 1.1 })],
+  },
+  // --- Type & glyphs (ascii-magic parity) ---
+  {
+    name: "ASCII art",
+    group: "Type & glyphs",
+    build: () => [withParams("ascii", { cell: 10, ink: "#e9e4d8", paper: "#16140f" }), withParams("grain", { amount: 0.08 })],
+  },
+  {
+    name: "ASCII colour",
+    group: "Type & glyphs",
+    build: () => [withParams("ascii", { cell: 9, colorMode: "source", paper: "#0a0a0a" })],
+  },
+  {
+    name: "ASCII glow",
+    group: "Type & glyphs",
+    build: () => [
+      withParams("ascii", { cell: 9, ink: "#9affc0", paper: "#04120a" }),
+      withParams("characterBloom", { intensity: 0.8, threshold: 0.4 }),
+    ],
+  },
+  {
+    name: "Block print",
+    group: "Type & glyphs",
+    build: () => [withParams("blockChars", { cell: 9, colorMode: "source" })],
+  },
+  {
+    name: "Crosshatch",
+    group: "Type & glyphs",
+    build: () => [makeEffect("grayscale"), withParams("crosshatch", { cell: 9 })],
+  },
+  {
+    name: "Diamonds",
+    group: "Type & glyphs",
+    build: () => [withParams("diamond", { cell: 12, colorMode: "source", paper: "#101010" })],
+  },
+  {
+    name: "Rain lines",
+    group: "Type & glyphs",
+    build: () => [withParams("lines", { cell: 7 })],
+  },
+  {
+    name: "Halftone dots",
+    group: "Type & glyphs",
+    build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
+  },
+  // --- Retro screen ---
+  {
+    name: "CRT",
+    group: "Retro screen",
+    build: () => [
+      withParams("scanlines", { spacing: 3, intensity: 0.4 }),
+      withParams("chromatic", { amount: 3 }),
+      withParams("vignette", { amount: 0.5 }),
+    ],
+  },
+  {
+    name: "CRT curve",
+    group: "Retro screen",
+    build: () => [
+      withParams("scanlines", { spacing: 3, intensity: 0.35 }),
+      withParams("crtCurvature", { amount: 0.3, edge: 0.4 }),
+      withParams("vignette", { amount: 0.5 }),
+    ],
+  },
+  {
+    name: "Scanlines RGB",
+    group: "Retro screen",
+    build: () => [withParams("scanlines", { spacing: 6, intensity: 0.6, rgbCells: true })],
+  },
+  {
+    name: "VHS glitch",
+    group: "Retro screen",
+    build: () => [
+      withParams("chromatic", { amount: 4, mode: "split" }),
+      withParams("glitch", { amount: 0.45 }),
+      withParams("scanlines", { spacing: 3, intensity: 0.3 }),
+      withParams("filmDust", { amount: 0.25 }),
+    ],
+  },
+  {
+    name: "Chromatic",
+    group: "Retro screen",
+    build: () => [withParams("chromatic", { amount: 8 }), withParams("grain", { amount: 0.12 })],
+  },
+  {
+    name: "Dispersion",
+    group: "Retro screen",
+    build: () => [withParams("chromatic", { amount: 8, samples: 8, quality: "high" }), withParams("grain", { amount: 0.08 })],
+  },
+  // --- Warp & texture ---
+  {
+    name: "Warp",
+    group: "Warp & texture",
+    build: () => [withParams("displace", { amount: 24, scale: 4 }), makeEffect("grayscale")],
+  },
+  {
+    name: "Sine warp",
+    group: "Warp & texture",
+    build: () => [withParams("displace", { amount: 30, scale: 4, type: "sine" })],
+  },
+  {
+    name: "Heavy grain",
+    group: "Warp & texture",
+    build: () => [makeEffect("grayscale"), withParams("grain", { amount: 0.5, mono: true })],
+  },
+  {
+    name: "Colour wash",
+    group: "Warp & texture",
+    build: () => [withParams("tint", { color: "#e8c9a8", opacity: 0.45, blend: "multiply" }), withParams("grain", { amount: 0.1 })],
+  },
+  {
+    name: "Vignette fade",
+    group: "Warp & texture",
+    build: () => [withParams("adjust", { contrast: 1.1 }), withParams("vignette", { amount: 0.8, radius: 0.7 })],
+  },
+  // --- Grades ---
+  {
     name: "Duotone",
+    group: "Grades",
     build: () => [
       withParams("gradientMap", {
         stops: [
@@ -194,89 +409,18 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
-    name: "Chromatic",
-    build: () => [withParams("chromatic", { amount: 8 }), withParams("grain", { amount: 0.12 })],
+    name: "Sepia film",
+    group: "Grades",
+    build: () => [makeEffect("gradientMap"), withParams("grain", { amount: 0.16 }), withParams("vignette", { amount: 0.5 })],
   },
-  {
-    name: "CRT",
-    build: () => [
-      withParams("scanlines", { spacing: 3, intensity: 0.4 }),
-      withParams("chromatic", { amount: 3 }),
-      withParams("vignette", { amount: 0.5 }),
-    ],
-  },
-  {
-    name: "Bloom",
-    build: () => [withParams("adjust", { contrast: 1.15, saturation: 1.2 }), withParams("bloom", { intensity: 0.8, threshold: 0.6 })],
-  },
-  {
-    name: "Warp",
-    build: () => [withParams("displace", { amount: 24, scale: 4 }), makeEffect("grayscale")],
-  },
-  {
-    name: "Threshold ink",
-    build: () => [withParams("threshold", { level: 0.5 }), withParams("grain", { amount: 0.1 })],
-  },
-  // --- More looks ported from the effect explorations ---
-  {
-    name: "Pixel dots",
-    build: () => [withParams("pixelate", { size: 22, shape: "circle" }), withParams("grain", { amount: 0.12 })],
-  },
-  {
-    name: "Pixel diamonds",
-    build: () => [withParams("pixelate", { size: 24, shape: "diamond" })],
-  },
-  {
-    name: "Halftone rings",
-    build: () => [makeEffect("grayscale"), withParams("halftone", { cell: 12, mode: "mono", dotShape: "ring" })],
-  },
-  {
-    name: "Bayer dither",
-    build: () => [withParams("dither", { type: "bayer4", levels: 2, mono: true })],
-  },
-  {
-    name: "Coarse Bayer",
-    build: () => [withParams("dither", { type: "bayer8", levels: 2, scale: 3, mono: true })],
-  },
-  {
-    name: "Floyd colour",
-    build: () => [withParams("dither", { type: "floydSteinberg", levels: 3, mono: false })],
-  },
-  {
-    name: "Sine warp",
-    build: () => [withParams("displace", { amount: 30, scale: 4, type: "sine" })],
-  },
-  {
-    name: "Scanlines RGB",
-    build: () => [withParams("scanlines", { spacing: 6, intensity: 0.6, rgbCells: true })],
-  },
-  {
-    name: "Poster pop",
-    build: () => [withParams("posterize", { levels: 5, perChannel: true }), withParams("adjust", { saturation: 1.4, contrast: 1.1 })],
-  },
-  {
-    name: "Colour wash",
-    build: () => [withParams("tint", { color: "#e8c9a8", opacity: 0.45, blend: "multiply" }), withParams("grain", { amount: 0.1 })],
-  },
-  {
-    name: "Soft focus",
-    build: () => [withParams("blur", { radius: 10 }), withParams("bloom", { intensity: 0.6, threshold: 0.65 })],
-  },
-  {
-    name: "Vignette fade",
-    build: () => [withParams("adjust", { contrast: 1.1 }), withParams("vignette", { amount: 0.8, radius: 0.7 })],
-  },
-  {
-    name: "Heavy grain",
-    build: () => [makeEffect("grayscale"), withParams("grain", { amount: 0.5, mono: true })],
-  },
-  // --- one-click colour grades ---
   {
     name: "Grade · B&W",
+    group: "Grades",
     build: () => [makeEffect("grayscale"), withParams("adjust", { contrast: 1.15 })],
   },
   {
     name: "Grade · Sepia",
+    group: "Grades",
     build: () => [
       makeEffect("grayscale"),
       withParams("gradientMap", { stops: [{ t: 0, color: "#241a12" }, { t: 1, color: "#f2e3cb" }], amount: 0.85 }),
@@ -284,14 +428,17 @@ export const PRESETS: Preset[] = [
   },
   {
     name: "Grade · Warm",
+    group: "Grades",
     build: () => [withParams("adjust", { temperature: 0.3, saturation: 1.1 })],
   },
   {
     name: "Grade · Cool",
+    group: "Grades",
     build: () => [withParams("adjust", { temperature: -0.3, saturation: 1.05 })],
   },
   {
     name: "Grade · Vintage",
+    group: "Grades",
     build: () => [
       withParams("adjust", { contrast: 0.9, saturation: 0.8 }),
       withParams("tint", { color: "#e8c9a8", opacity: 0.2, blend: "soft-light" }),
@@ -301,74 +448,15 @@ export const PRESETS: Preset[] = [
   },
   {
     name: "Grade · Fade",
+    group: "Grades",
     build: () => [withParams("adjust", { contrast: 0.8, gamma: 1.25 })],
   },
   {
     name: "Grade · Cyber",
+    group: "Grades",
     build: () => [
       withParams("gradientMap", { stops: [{ t: 0, color: "#06122a" }, { t: 0.5, color: "#1ea7b6" }, { t: 1, color: "#f06" }], amount: 0.6 }),
       withParams("chromatic", { amount: 4 }),
-    ],
-  },
-  // --- converter / style looks (ascii-magic parity) ---
-  {
-    name: "ASCII art",
-    build: () => [withParams("ascii", { cell: 10, ink: "#e9e4d8", paper: "#16140f" }), withParams("grain", { amount: 0.08 })],
-  },
-  {
-    name: "ASCII colour",
-    build: () => [withParams("ascii", { cell: 9, colorMode: "source", paper: "#0a0a0a" })],
-  },
-  {
-    name: "Block print",
-    build: () => [withParams("blockChars", { cell: 9, colorMode: "source" })],
-  },
-  {
-    name: "Crosshatch",
-    build: () => [makeEffect("grayscale"), withParams("crosshatch", { cell: 9 })],
-  },
-  {
-    name: "Diamonds",
-    build: () => [withParams("diamond", { cell: 12, colorMode: "source", paper: "#101010" })],
-  },
-  {
-    name: "Rain lines",
-    build: () => [withParams("lines", { cell: 7 })],
-  },
-  {
-    name: "Halftone dots",
-    build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
-  },
-  {
-    name: "Mosaic tiles",
-    build: () => [withParams("mosaic", { size: 22, gap: 0.12 })],
-  },
-  {
-    name: "LEGO",
-    build: () => [withParams("lego", { size: 24 })],
-  },
-  {
-    name: "VHS glitch",
-    build: () => [
-      withParams("chromatic", { amount: 4, mode: "split" }),
-      withParams("glitch", { amount: 0.45 }),
-      withParams("scanlines", { spacing: 3, intensity: 0.3 }),
-      withParams("filmDust", { amount: 0.25 }),
-    ],
-  },
-  {
-    name: "CRT curve",
-    build: () => [
-      withParams("scanlines", { spacing: 3, intensity: 0.35 }),
-      withParams("crtCurvature", { amount: 0.3, edge: 0.4 }),
-      withParams("vignette", { amount: 0.5 }),
-    ],
-  },
-  {
-    name: "ASCII glow",
-    build: () => [
-      withParams("ascii", { cell: 9, ink: "#9affc0", paper: "#04120a" }),
-      withParams("characterBloom", { intensity: 0.8, threshold: 0.4 }),
     ],
   },
 ];

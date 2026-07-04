@@ -4,6 +4,7 @@ import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import type { SavedEffect } from "@/lib/bg-lab/library";
+import { PRESET_GROUPS } from "@/lib/bg-lab/presets";
 import { useLibrary } from "./LibraryProvider";
 import { CollapsibleSection, labButton } from "./panel";
 
@@ -78,13 +79,23 @@ export function SavedPanel() {
           </div>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] text-text-secondary">Presets</span>
-          <div className="flex flex-wrap gap-1.5">
-            {builtins.map((s) => (
-              <Chip key={s.id} set={s} onApply={() => applyStack(s.stack)} />
-            ))}
-          </div>
+        {/* Built-in presets, clustered by group — a 40+ flat chip wall was
+            unscannable; small headers give the eye somewhere to land. */}
+        <div className="flex flex-col gap-2.5">
+          {PRESET_GROUPS.map((g) => {
+            const members = builtins.filter((s) => s.group === g);
+            if (members.length === 0) return null;
+            return (
+              <div key={g} className="flex flex-col gap-1.5">
+                <span className="text-[11px] text-text-secondary">{g}</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {members.map((s) => (
+                    <Chip key={s.id} set={s} onApply={() => applyStack(s.stack)} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </CollapsibleSection>
