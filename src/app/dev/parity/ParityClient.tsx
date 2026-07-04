@@ -144,6 +144,24 @@ const TEST_CONFIGS: TestConfig[] = [
     label: "Chromatic · high quality",
     stack: [{ type: "chromatic", params: { quality: "high", samples: 4, amount: 6 } }],
   },
+  {
+    // background:"paper" — ascii's catalog default is "blurred", which is a
+    // shouldBridge param (would silently test the CPU bridge, not the atlas).
+    label: "ASCII (atlas)",
+    stack: [{ type: "ascii", params: { background: "paper" } }],
+  },
+  {
+    label: "ASCII (atlas, over photo)",
+    stack: [{ type: "ascii", params: { background: "original", colorMode: "source" } }],
+  },
+  {
+    label: "Glyph dots (atlas)",
+    stack: [{ type: "glyphDots" }],
+  },
+  {
+    label: "Crosshatch (atlas, shape mode)",
+    stack: [{ type: "crosshatch" }],
+  },
 ];
 
 function buildConfig(test: TestConfig): BgConfig {

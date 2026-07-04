@@ -22,6 +22,9 @@ import { BLUE_NOISE_128, BLUE_NOISE_SIZE } from "../bluenoise";
 
 const DEFAULT_BG = "#cdd9e0";
 
+/** The 8 glyph-family EffectTypes that share the `glyphs` GL pass. */
+const GLYPH_TYPES = new Set<Effect["type"]>(["ascii", "blockChars", "crosshatch", "diagonal", "diamond", "lines", "mixed", "glyphDots"]);
+
 /** Ops that run on the CPU bridge instead of a GPU shader. */
 function shouldBridge(eff: Effect): boolean {
   const t = eff.type;
@@ -31,6 +34,21 @@ function shouldBridge(eff: Effect): boolean {
     if (t === "dither" && (eff.params.type === "floydSteinberg" || eff.params.type === "atkinson" || eff.params.type === "sierra")) return true;
     if (t === "pixelate" && eff.params.shape && eff.params.shape !== "square") return true;
     if (t === "gradientMap" && Array.isArray(eff.params.stops) && (eff.params.stops as unknown[]).length > 8) return true;
+    if (GLYPH_TYPES.has(t)) {
+      // Exotic glyph configurations bridge to the CPU renderGlyph:
+      //  - background transparent/blurred: the GL pass only implements
+      //    paper/original (transparent has no meaningful GL compositing target
+      //    in this opaque-canvas pipeline; blurred needs the CPU blur op).
+      //  - non-normal blendMode: the GL pass always composites with a plain mix.
+      //  - dotGrid: decorative overlay the GL pass doesn't draw.
+      //  - randomize: CPU uses a sin-based hash for glyph index — f32/f64
+      //    divergent, and glyph index is a discrete decision, so this must not
+      //    run on GPU (a flipped index is a different glyph, not a rounding blip).
+      if (eff.params.background === "blurred" || eff.params.background === "transparent") return true;
+      if (eff.params.blendMode && eff.params.blendMode !== "normal") return true;
+      if (eff.params.dotGrid === true) return true;
+      if (eff.params.randomize === true) return true;
+    }
     return false;
   }
   return true; // no GPU pass → bridge to the CPU op
@@ -53,6 +71,10 @@ export class GLEngine implements RenderEngine {
   /** F5a same-size temp pool for multi-pass ops, keyed by name. Sized W×H;
    * dropped wholesale on resize (ensureBuffers) and dispose. */
   private temps = new Map<string, GLTexture>();
+  /** Param-dependent sampler cache for GpuPass.dynamicSamplers (e.g. glyph
+   * atlases), keyed by sampler `name`. Rebuilt when `sig` changes; the
+   * previous texture for that name is deleted first — atlases have no FBO. */
+  private dynAssets = new Map<string, { sig: string; tex: WebGLTexture }>();
 
   constructor() {
     this.glc = new GLContext();
@@ -226,6 +248,11 @@ export class GLEngine implements RenderEngine {
       const prog = this.glc.program(pass.frag!);
       const reads = [{ name: "u_tex", tex: cur.tex }];
       if (pass.samplers) for (const s of pass.samplers) reads.push({ name: s.name, tex: this.assetTex(s.key) });
+      if (pass.dynamicSamplers) {
+        for (const s of pass.dynamicSamplers(eff.params as Record<string, ParamValue>, u, { w: W, h: H })) {
+          reads.push({ name: s.name, tex: this.dynAssetTex(s.name, s.sig, s.build) });
+        }
+      }
       this.glc.pass(prog, other, reads, (g, pr) => {
         setCommon(this.glc, g, pr, W, H, u, t);
         pass.setUniforms?.(g, pr, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
@@ -257,10 +284,24 @@ export class GLEngine implements RenderEngine {
     return tex;
   }
 
+  /** Resolve a GpuPass.dynamicSamplers entry: cache hit on matching `sig`,
+   * otherwise delete the previous texture for this `name` (if any) and build
+   * fresh via `build()` + createAssetTextureRGBA. */
+  private dynAssetTex(name: string, sig: string, build: () => HTMLCanvasElement): WebGLTexture {
+    const hit = this.dynAssets.get(name);
+    if (hit && hit.sig === sig) return hit.tex;
+    if (hit) this.glc.gl.deleteTexture(hit.tex);
+    const tex = this.glc.createAssetTextureRGBA(build());
+    this.dynAssets.set(name, { sig, tex });
+    return tex;
+  }
+
   dispose() {
     const gl = this.glc.gl;
     this.assets.forEach((t) => gl.deleteTexture(t));
     this.assets.clear();
+    this.dynAssets.forEach((d) => gl.deleteTexture(d.tex));
+    this.dynAssets.clear();
     this.temps.forEach((tx) => {
       gl.deleteTexture(tx.tex);
       gl.deleteFramebuffer(tx.fbo);

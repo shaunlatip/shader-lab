@@ -145,6 +145,24 @@ export class GLContext {
     return tex;
   }
 
+  /** F4 (dynamic): sampler-only RGBA texture from a canvas/image source — NEAREST/
+   * NEAREST, CLAMP_TO_EDGE both axes, no FBO. Mirrors createAssetTextureR8's
+   * sampler-only pattern but for RGBA8 sources (glyph atlases). Deliberately NO
+   * FLIP_Y: the atlas is authored and addressed in top-left-origin UV space —
+   * the sampling pass flips its own y addressing (1.0 - v_uv.y), same convention
+   * every pass in shaders.ts uses to read u_tex in canvas px space. */
+  createAssetTextureRGBA(src: TexImageSource): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
   /** Upload an external source (image/video/canvas) into a texture, FLIP_Y so it's upright. */
   uploadExternal(target: GLTexture, src: TexImageSource) {
     const gl = this.gl;
