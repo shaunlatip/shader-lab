@@ -174,9 +174,9 @@ then S each)*
 |---|---|---|---|---|
 | P0 | honesty + hygiene (7 items) | — | ~1 day | ✅ shipped (PR #4) |
 | P1 | grain, gradientMap, kuwahara, lineArt, crt GL passes | P0.1 harness | ~2–3 days | ✅ all 5 + halftone parity fix. Bench: kuwahara smooth 2790×, lineArt 724×, crt 60×, grain 47×, gradientMap 44× |
-| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days | ✅ F4 + blue-noise (0.00 parity; shared TS module, not PNG). ASCII atlas still open (item 5 of the follow-up pass) |
+| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days | ✅ F4 + blue-noise (0.00 parity). ✅ ASCII/glyph atlas 2026-07-04: F4 dynamic (param-keyed) samplers, all 8 glyph types GL-native (66×, bridge gone), exotic params (blurred/transparent bg, blends, dotGrid, randomize) stay correctly bridged |
 | P3 | F5a → blur/XDoG; F5b → bloom; F6+aniso-Kuwahara | F5a/b/6 | ~3–5 days | ✅ F5a + blur(4 modes)/bloom/characterBloom. ✅ XDoG shipped 2026-07-04 (sharpened Winnemöller, max 1/255 parity, 16-bit packed RGBA8 temps). ✅ CPU blur edge-alpha fixed (opaquify; minAlphaCpu 255 all modes). F5b pyramid skipped; F6/aniso deferred (needs new foundation) |
-| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked | ◐ overflow+gooey + chromatic shipped overnight. ✅ patterns 2026-07-04: moire/hex/truchet/voronoi/fbm as CPU pattern-source draws (GL SDF variant gated on a pattern-drift feature that doesn't exist — no dead code). Creative-medium singles in flight |
+| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked | ✅ complete 2026-07-04: overflow+gooey + chromatic (overnight); patterns moire/hex/truchet/voronoi/fbm (CPU pattern-source draws — GL SDF variant gated on a pattern-drift feature that doesn't exist, no dead code); all five creative-medium singles (receipt, flutedGlass, ledPanel, crochet at max 1/255 parity; lego stud lighting CPU-only by design) |
 | ∥ | export track (GIF palette, MP4 backpressure, worker) | — | interleave | ✅ complete 2026-07-04: still export runs in a Worker (OffscreenCanvas; engine worker-compat via tmpCanvas fallback), verified live |
 
 Post-P3 bridge status: every op in the preset library runs GPU-side except the
