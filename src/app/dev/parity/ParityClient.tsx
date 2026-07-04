@@ -197,12 +197,45 @@ async function benchByLabel(label: string) {
   const config = buildConfig(test);
   return { gl: benchEngine("gl", config, DIMS, hookImage), cpu: benchEngine("cpu", config, DIMS, hookImage) };
 }
+// Render a pattern source (no effects) into a visible probe canvas so a driven
+// browser can screenshot it — pattern types have no image-diff parity bar
+// (both engines share the same CPU draw path for the base), they need eyeballs.
+function showPattern(pattern: Record<string, unknown>) {
+  const cfg = makeDefaultConfig();
+  cfg.source = {
+    mode: "pattern",
+    imageId: null,
+    solidColor: "#cdd9e0",
+    pattern: pattern as unknown as NonNullable<BgConfig["source"]["pattern"]>,
+  };
+  cfg.stack = [];
+  let canvas = document.getElementById("pattern-probe") as HTMLCanvasElement | null;
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.id = "pattern-probe";
+    canvas.style.position = "fixed";
+    canvas.style.top = "0";
+    canvas.style.left = "0";
+    canvas.style.zIndex = "9999";
+    document.body.appendChild(canvas);
+  }
+  const engine = createEngine("cpu");
+  try {
+    engine.setSource({ kind: "pattern", pattern: cfg.source.pattern! });
+    engine.render(canvas, cfg, DIMS);
+  } finally {
+    engine.dispose();
+  }
+  return "rendered";
+}
+
 if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).__parity = {
     labels: () => TEST_CONFIGS.map((t) => t.label),
     hasWebGL2: () => hasRealWebGL2(),
     run: runParityByLabel,
     bench: benchByLabel,
+    showPattern,
   };
 }
 

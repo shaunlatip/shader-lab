@@ -61,6 +61,11 @@ const PATTERN_TYPE_LABEL: Record<string, string> = {
   stripes: "Stripes",
   rings: "Rings",
   iso: "Iso lattice",
+  moire: "Moiré",
+  hex: "Hex grid",
+  truchet: "Truchet",
+  voronoi: "Voronoi",
+  fbm: "Noise (fbm)",
 };
 
 /** Human label for a source, for auto-naming. */

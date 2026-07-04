@@ -13,6 +13,11 @@ const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
   { value: "stripes", label: "Stripes" },
   { value: "rings", label: "Rings" },
   { value: "iso", label: "Iso lattice" },
+  { value: "moire", label: "Moiré" },
+  { value: "hex", label: "Hex grid" },
+  { value: "truchet", label: "Truchet" },
+  { value: "voronoi", label: "Voronoi" },
+  { value: "fbm", label: "Noise (fbm)" },
 ];
 
 const PATTERN_CONTROLS: ControlSpec[] = [
