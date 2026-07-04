@@ -149,20 +149,50 @@ function jitterEffect(e: Effect): Effect {
   return { ...e, params };
 }
 
-/** A coherent ~3–4-effect random look on a random gallery source. */
-export function inspire(): BgConfig {
+/** The coherent ~3–4-effect random stack shared by both inspire flavours. */
+function inspireStack(): Effect[] {
   const stack: Effect[] = [jitterEffect(pick(STYLE_LOOKS)())];
   if (Math.random() < 0.5) stack.push(jitterEffect(pick(GRADES)())); // grade after the style
   const moodCount = 1 + Math.floor(Math.random() * 2); // 1–2 moods
   const moods = [...MOOD_POST].sort(() => Math.random() - 0.5).slice(0, moodCount);
   for (const m of moods) stack.push(jitterEffect(m()));
+  return stack;
+}
+
+/** A coherent random look on a random gallery source (sync fallback). */
+export function inspire(): BgConfig {
   const img = pick(GALLERY);
   return {
     version: 1,
     output: { aspect: "3:2", longEdge: 2000 },
     source: { mode: "image", imageId: img.id, solidColor: "#cdd9e0" },
-    stack,
+    stack: inspireStack(),
   };
+}
+
+/** Inspire from a random Pexels photo: random tag + page through /api/pexels,
+ * random pick from the results. Falls back to the gallery when the key is
+ * missing (route returns 501), the fetch fails, or a page comes back empty —
+ * the button must always produce a look. */
+export async function inspireFromPexels(): Promise<BgConfig> {
+  try {
+    const tag = pick([...PEXELS_TAGS]);
+    const page = 1 + Math.floor(Math.random() * 3);
+    const r = await fetch(`/api/pexels?q=${encodeURIComponent(tag)}&page=${page}&type=photo`);
+    if (!r.ok) return inspire();
+    const data = (await r.json()) as { results?: { full: string }[] };
+    const results = data.results ?? [];
+    if (results.length === 0) return inspire();
+    const photo = pick(results);
+    return {
+      version: 1,
+      output: { aspect: "3:2", longEdge: 2000 },
+      source: { mode: "image", imageId: `pexels:${photo.full}`, solidColor: "#cdd9e0" },
+      stack: inspireStack(),
+    };
+  } catch {
+    return inspire();
+  }
 }
 
 // Curated looks distilled from the effect explorations. Applying a preset

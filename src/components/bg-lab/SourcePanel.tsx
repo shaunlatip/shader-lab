@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Crop, Sparkles, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GALLERY, inspire } from "@/lib/bg-lab/presets";
+import { GALLERY, inspireFromPexels } from "@/lib/bg-lab/presets";
 import { useBgLab } from "./BgLabProvider";
 import { PexelsSearch } from "./PexelsSearch";
 import { SolidColorPanel } from "./SolidColorPanel";
@@ -15,6 +15,7 @@ export function SourcePanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
   const [cropOpen, setCropOpen] = useState(false);
+  const [inspiring, setInspiring] = useState(false);
   const { source } = config;
   const hasMedia = (source.mode === "image" || source.mode === "video") && !!source.imageId;
   // pattern mode never shows crop UI
@@ -52,10 +53,20 @@ export function SourcePanel() {
       <div className="flex gap-1.5">
         <button
           type="button"
-          onClick={() => dispatch({ t: "replace", config: inspire() })}
-          className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-md text-[12px]")}
+          disabled={inspiring}
+          onClick={async () => {
+            // random Pexels photo + curated random stack; falls back to the
+            // gallery inside inspireFromPexels when the API is unavailable
+            setInspiring(true);
+            try {
+              dispatch({ t: "replace", config: await inspireFromPexels() });
+            } finally {
+              setInspiring(false);
+            }
+          }}
+          className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-md text-[12px] disabled:opacity-60")}
         >
-          <Sparkles className="h-3.5 w-3.5" /> Inspire me
+          <Sparkles className="h-3.5 w-3.5" /> {inspiring ? "Inspiring…" : "Inspire me"}
         </button>
         {hasMedia && (
           <button
