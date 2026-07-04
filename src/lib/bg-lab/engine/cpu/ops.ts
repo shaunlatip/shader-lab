@@ -1005,6 +1005,93 @@ const halftone: Op = (canvas, p, u) => {
   ctx.putImageData(out, 0, 0);
 };
 
+// ---------------------------------------------------------------- receipt
+// Thermal-printer scanline bars — the exact per-pixel mirror of the GL pass
+// (shaders.ts `receipt`). Spec (must stay in lockstep):
+//   band      period = max(2, round(size*u)) px; band = floor(y/period);
+//             bandCenterRow = min(H-1, floor(band*period + period/2)) — an
+//             INTEGER row (NEAREST source read, no interpolation).
+//   coverage  luma601 of src at (x, bandCenterRow); cov = (1-luma)^contrast
+//             is the ink coverage for THIS COLUMN of the band.
+//   bar SDF   d = |y - (band*period + period/2 - 0.5)| - cov*period/2, in px;
+//             mask = aaCov(d) — the halftone 1px linear ramp (see halftone
+//             block comment above): clamp(0.5 - d, 0, 1).
+//   out       mix(paper, ink, mask) per pixel.
+const receipt: Op = (canvas, p, u) => {
+  const { ctx, img, d: src, W, H } = getData(canvas);
+  const period = Math.max(2, Math.round(pn(p, "size", 5) * u));
+  const contrast = pn(p, "contrast", 1.2);
+  const [inkR, inkG, inkB] = hexRGB(ps(p, "ink", "#1a1a1a"));
+  const [papR, papG, papB] = hexRGB(ps(p, "paper", "#f6f3ea"));
+  const out = ctx.createImageData(W, H);
+  const o = out.data;
+  // aaCov: the shared halftone 1px linear area ramp on an SDF in px units.
+  const aaCov = (dPx: number) => clamp(0.5 - dPx, 0, 1);
+  for (let y = 0; y < H; y++) {
+    const band = Math.floor(y / period);
+    const bandCenterRow = Math.min(H - 1, Math.floor(band * period + period / 2));
+    const barCenterY = band * period + period / 2 - 0.5;
+    for (let x = 0; x < W; x++) {
+      const si = (bandCenterRow * W + x) * 4;
+      const lum = luma601(src[si], src[si + 1], src[si + 2]) / 255;
+      const cov = Math.pow(clamp(1 - lum, 0, 1), contrast);
+      const dPx = Math.abs(y - barCenterY) - (cov * period) / 2;
+      const mask = aaCov(dPx);
+      const di = (y * W + x) * 4;
+      o[di] = Math.round(papR + (inkR - papR) * mask);
+      o[di + 1] = Math.round(papG + (inkG - papG) * mask);
+      o[di + 2] = Math.round(papB + (inkB - papB) * mask);
+      o[di + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+};
+
+// ---------------------------------------------------------------- flutedGlass
+// Vertical reeded-glass ribs — the exact per-pixel mirror of the GL pass
+// (shaders.ts `flutedGlass`). Spec (must stay in lockstep):
+//   rib       w = max(2, round(size*u)); xi = floor(x); ribX = xi - w*floor(xi/w)
+//             (integer mod, matches GLSL mod() for non-negative xi); t = (ribX+0.5)/w - 0.5.
+//   refract   dx = sin(t*PI)*amount*w*0.6 (continuous — sin of a bounded value is allowed).
+//   sample    sx = x + dx; MANUAL 2-tap horizontal bilinear: x0 = floor(sx),
+//             frac = sx-x0, NEAREST reads at clamp(x0) and clamp(x0+1), mixed by frac.
+//             (never hardware LINEAR — its interpolant quantizes differently per GPU.)
+//   specular  h = specular * max(cos(PI*(t-0.15)), 0)^24 — additive per channel.
+//   out       clamp(sampled + h, 0, 1).
+const flutedGlass: Op = (canvas, p, u) => {
+  const { ctx, img, d: src, W, H } = getData(canvas);
+  const w = Math.max(2, Math.round(pn(p, "size", 18) * u));
+  const amount = pn(p, "amount", 0.5);
+  const specular = pn(p, "specular", 0.35);
+  const out = ctx.createImageData(W, H);
+  const o = out.data;
+  const readNearest = (xi: number, y: number, ch: number) => {
+    const cx = xi < 0 ? 0 : xi > W - 1 ? W - 1 : xi;
+    return src[(y * W + cx) * 4 + ch];
+  };
+  for (let x = 0; x < W; x++) {
+    const xi = Math.floor(x);
+    const ribX = xi - w * Math.floor(xi / w);
+    const t = (ribX + 0.5) / w - 0.5;
+    const dx = Math.sin(t * Math.PI) * amount * w * 0.6;
+    const hMag = Math.pow(Math.max(Math.cos(Math.PI * (t - 0.15)), 0), 24) * specular;
+    for (let y = 0; y < H; y++) {
+      const sx = x + dx;
+      const x0 = Math.floor(sx);
+      const frac = sx - x0;
+      const di = (y * W + x) * 4;
+      for (let ch = 0; ch < 3; ch++) {
+        const a = readNearest(x0, y, ch);
+        const b = readNearest(x0 + 1, y, ch);
+        const sampled = a + (b - a) * frac;
+        o[di + ch] = clamp(Math.round(sampled + hMag * 255), 0, 255);
+      }
+      o[di + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+};
+
 export const OPS: Record<EffectType, Op> = {
   adjust,
   blur,
@@ -1035,6 +1122,8 @@ export const OPS: Record<EffectType, Op> = {
   braille,
   mosaic,
   lego,
+  receipt,
+  flutedGlass,
   lineArt,
   kuwahara,
   // post parity

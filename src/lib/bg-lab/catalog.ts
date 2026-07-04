@@ -621,6 +621,29 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     heavy: true,
     controls: [{ kind: "slider", key: "size", label: "Brick size", min: 8, max: 80, step: 1, default: 22, unit: true }],
   },
+  receipt: {
+    type: "receipt",
+    category: "converter",
+    label: "Receipt print",
+    blurb: "Thermal-printer scanline bars",
+    controls: [
+      { kind: "slider", key: "size", label: "Band size", min: 2, max: 16, step: 1, default: 5, unit: true },
+      { kind: "slider", key: "contrast", label: "Contrast", min: 0.5, max: 3, step: 0.05, default: 1.2 },
+      { kind: "color", key: "ink", label: "Ink", default: "#1a1a1a" },
+      { kind: "color", key: "paper", label: "Paper", default: "#f6f3ea" },
+    ],
+  },
+  flutedGlass: {
+    type: "flutedGlass",
+    category: "converter",
+    label: "Fluted glass",
+    blurb: "Vertical reeded-glass refraction with rib highlights",
+    controls: [
+      { kind: "slider", key: "size", label: "Rib width", min: 4, max: 64, step: 1, default: 18, unit: true },
+      { kind: "slider", key: "amount", label: "Refraction", min: 0, max: 1, step: 0.01, default: 0.5 },
+      { kind: "slider", key: "specular", label: "Specular", min: 0, max: 1, step: 0.01, default: 0.35 },
+    ],
+  },
   lineArt: {
     type: "lineArt",
     category: "converter",
@@ -737,6 +760,8 @@ export const EFFECT_ORDER: EffectType[] = [
   "braille",
   "mosaic",
   "lego",
+  "receipt",
+  "flutedGlass",
   "pixelate",
   "dither",
   "halftone",

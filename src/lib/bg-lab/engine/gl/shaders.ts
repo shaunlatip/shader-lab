@@ -534,6 +534,80 @@ void main(){
   },
 };
 
+// ---------------------------------------------------------------- receipt
+// GPU accelerator for the CPU `receipt` op (ops.ts) — the two implement ONE
+// spec: thermal-printer scanline bars. period = max(2,round(size*u)) px;
+// band = floor(y/period); bandCenterRow = an INTEGER row (NEAREST sample of
+// the source at (x, bandCenterRow), luma601 -> coverage -> pow(contrast) ink
+// area for this column); bar SDF in px vs a 1px linear aaCov ramp — the same
+// AA formula as halftone's aaCov (see that block comment), defined locally
+// here since aaCov lives inside halftone's frag, not HEADER.
+const receipt: GpuPass = {
+  frag: f(`uniform float u_period; uniform float u_contrast; uniform vec3 u_ink; uniform vec3 u_paper;
+// 1px linear area ramp on an SDF in PX units — same formula as halftone's aaCov.
+float aaCov(float dPx){ return clamp(0.5 - dPx, 0.0, 1.0); }
+void main(){
+  vec2 P = vec2(v_uv.x, 1.0 - v_uv.y) * u_dims;   // canvas px, top-left origin
+  float x = floor(P.x), y = floor(P.y);
+  float band = floor(y / u_period);
+  float bandCenterRow = min(u_dims.y - 1.0, floor(band * u_period + u_period * 0.5));
+  vec2 idx = clamp(vec2(x, bandCenterRow), vec2(0.0), u_dims - 1.0);
+  vec3 src = texture(u_tex, vec2((idx.x+0.5)/u_dims.x, 1.0 - (idx.y+0.5)/u_dims.y)).rgb;
+  float lum = luma601(src);
+  float cov = pow(clamp(1.0 - lum, 0.0, 1.0), u_contrast);
+  float barCenterY = band * u_period + u_period * 0.5 - 0.5;
+  float dPx = abs(y - barCenterY) - cov * u_period * 0.5;
+  float mask = aaCov(dPx);
+  o = vec4(mix(u_paper, u_ink, mask), 1.0);
+}`),
+  setUniforms: (gl, prog, p, u) => {
+    gl.uniform1f(loc(gl, prog, "u_period"), Math.max(2, Math.round(pn(p, "size", 5) * u)));
+    gl.uniform1f(loc(gl, prog, "u_contrast"), pn(p, "contrast", 1.2));
+    gl.uniform3fv(loc(gl, prog, "u_ink"), col(p, "ink", "#1a1a1a"));
+    gl.uniform3fv(loc(gl, prog, "u_paper"), col(p, "paper", "#f6f3ea"));
+  },
+};
+
+// ---------------------------------------------------------------- flutedGlass
+// GPU accelerator for the CPU `flutedGlass` op (ops.ts) — the two implement
+// ONE spec: vertical reeded-glass ribs. w = max(2,round(size*u)); integer rib
+// index via floor + integer mod; refraction dx = sin(t*PI)*amount*w*0.6 is
+// continuous (bounded sin, allowed per the parity doctrine); the source
+// sample is a MANUAL 2-tap horizontal bilinear (floor/ceil + explicit mix by
+// fract) — never hardware LINEAR, since its interpolant quantizes
+// differently per GPU and would break preview==export. Specular is an
+// additive cos^24 lobe, same formula both sides.
+const flutedGlass: GpuPass = {
+  frag: f(`uniform float u_w; uniform float u_amount; uniform float u_specular;
+vec3 readNearest(float xi, float y){
+  float cx = clamp(xi, 0.0, u_dims.x - 1.0);
+  float cy = clamp(y,  0.0, u_dims.y - 1.0);
+  return texture(u_tex, vec2((cx+0.5)/u_dims.x, 1.0 - (cy+0.5)/u_dims.y)).rgb;
+}
+void main(){
+  vec2 P = vec2(v_uv.x, 1.0 - v_uv.y) * u_dims;   // canvas px, top-left origin
+  float x = floor(P.x), y = floor(P.y);
+  float xi = floor(x);
+  float ribX = xi - u_w * floor(xi / u_w);        // integer mod
+  float t = (ribX + 0.5) / u_w - 0.5;              // in [-0.5, 0.5)
+  float dx = sin(t * 3.14159265) * u_amount * u_w * 0.6;
+  float sx = x + dx;
+  float x0 = floor(sx);
+  float frac = sx - x0;
+  // manual 2-tap horizontal bilinear — NOT hardware LINEAR (see block comment)
+  vec3 a = readNearest(x0, y);
+  vec3 b = readNearest(x0 + 1.0, y);
+  vec3 sampled = mix(a, b, frac);
+  float h = u_specular * pow(max(cos(3.14159265 * (t - 0.15)), 0.0), 24.0);
+  o = vec4(clamp(sampled + h, 0.0, 1.0), 1.0);
+}`),
+  setUniforms: (gl, prog, p, u) => {
+    gl.uniform1f(loc(gl, prog, "u_w"), Math.max(2, Math.round(pn(p, "size", 18) * u)));
+    gl.uniform1f(loc(gl, prog, "u_amount"), pn(p, "amount", 0.5));
+    gl.uniform1f(loc(gl, prog, "u_specular"), pn(p, "specular", 0.35));
+  },
+};
+
 // ---------------------------------------------------------------- CRT curvature
 // Mirrors cpu/postfx.ts crtCurvature exactly: integer pixel coords (not pixel
 // centres) for the barrel-warp math, NEAREST source sample via round(), and the
@@ -1417,6 +1491,8 @@ export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   pixelate,
   dither,
   halftone,
+  receipt,
+  flutedGlass,
   crtCurvature,
   gradientMap,
   grain,

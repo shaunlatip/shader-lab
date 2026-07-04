@@ -648,7 +648,12 @@ export const kuwahara: Op = (canvas, p, u) => {
 
 // ---------------------------------------------------------------- lego
 // Posterised studded tiles: a flat brick fill per cell + a raised dot with a
-// light highlight and dark shade.
+// light highlight and dark shade, plus a fixed-direction 2D fake light per
+// stud (up-left) and a subtle brick-edge shade. CPU-only by design (lego is a
+// canvas-path composite, not a per-pixel shader-portable op) — constant-angle
+// atan2/trig here is over CONSTANTS (f64, computed once, not per-pixel data),
+// which the parity doctrine allows.
+const LEGO_LIGHT_ANGLE = Math.atan2(-0.65, -0.45); // light dir L = normalize(-0.45,-0.65)
 export const lego: Op = (canvas, p, u) => {
   const size = Math.max(6, pn(p, "size", 22) * u);
   const W = canvas.width,
@@ -661,6 +666,8 @@ export const lego: Op = (canvas, p, u) => {
   const ctx = ctx2d(canvas);
   ctx.clearRect(0, 0, W, H);
   const studR = Math.min(tw, th) * 0.3;
+  const lightDx = Math.cos(LEGO_LIGHT_ANGLE),
+    lightDy = Math.sin(LEGO_LIGHT_ANGLE);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const i = (r * cols + c) * 4;
@@ -677,6 +684,10 @@ export const lego: Op = (canvas, p, u) => {
       ctx.fillRect(x, y, tw, th * 0.12);
       ctx.fillStyle = `rgba(0,0,0,0.18)`;
       ctx.fillRect(x, y + th * 0.88, tw, th * 0.12);
+      // brick-edge shade: darken the tile's bottom-right 1px edge
+      ctx.fillStyle = `rgba(0,0,0,0.18)`;
+      ctx.fillRect(x, y + th - 1, tw, 1);
+      ctx.fillRect(x + tw - 1, y, 1, th);
       // stud
       const cx = x + tw / 2,
         cy = y + th / 2;
@@ -692,6 +703,20 @@ export const lego: Op = (canvas, p, u) => {
       ctx.arc(cx - studR * 0.28, cy - studR * 0.28, studR * 0.4, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(255,255,255,0.28)`;
       ctx.fill();
+      // fixed-direction fake light: highlight arc on the lit side (offset 1px
+      // toward the light), shadow arc on the opposite side.
+      const span = (100 * Math.PI) / 180;
+      const arcLineWidth = Math.max(1, studR * 0.28);
+      ctx.lineWidth = arcLineWidth;
+      ctx.beginPath();
+      ctx.arc(cx - lightDx, cy - lightDy, studR, LEGO_LIGHT_ANGLE - span, LEGO_LIGHT_ANGLE + span);
+      ctx.strokeStyle = `rgba(255,255,255,0.30)`;
+      ctx.stroke();
+      const shadowAngle = LEGO_LIGHT_ANGLE + Math.PI;
+      ctx.beginPath();
+      ctx.arc(cx + lightDx, cy + lightDy, studR, shadowAngle - span, shadowAngle + span);
+      ctx.strokeStyle = `rgba(0,0,0,0.30)`;
+      ctx.stroke();
     }
   }
 };

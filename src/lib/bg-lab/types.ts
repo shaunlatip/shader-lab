@@ -41,6 +41,8 @@ export type EffectType =
   | "braille"
   | "mosaic"
   | "lego"
+  | "receipt"
+  | "flutedGlass"
   // post parity (Phase 4)
   | "crtCurvature"
   | "glitch"

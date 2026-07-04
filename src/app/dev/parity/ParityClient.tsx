@@ -41,6 +41,14 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "halftone", params: { gooey: 0.8, overflow: 0.5 } }],
   },
   {
+    label: "Receipt",
+    stack: [{ type: "receipt" }],
+  },
+  {
+    label: "Fluted glass",
+    stack: [{ type: "flutedGlass", params: { amount: 0.6 } }],
+  },
+  {
     label: "Dither · Bayer 4x4",
     stack: [{ type: "dither", params: { type: "bayer4" } }],
   },
