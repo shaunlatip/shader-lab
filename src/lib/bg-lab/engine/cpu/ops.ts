@@ -65,6 +65,29 @@ const adjust: Op = (canvas, p) => {
 };
 
 // ---------------------------------------------------------------- blur
+
+/** Snap alpha to opaque after a blur-family recompose. The overscan/copy
+ * geometry can't cover the full kernel reach at edges (gaussian: overscan r <
+ * ~3σ; directional: shifted copies miss the leading/trailing r px), leaving
+ * partial edge alpha in still exports. Canvas stores UNpremultiplied rgb, so
+ * the blurred rgb already equals premult/alpha — the same renormalized color
+ * the GL pass produces — and forcing a=255 matches GL exactly with zero rgb
+ * change. Keeping the overscan geometry untouched is load-bearing: the GL
+ * blur mirrors it for rgb parity (commit d5687fb). */
+function opaquify(canvas: HTMLCanvasElement) {
+  const ctx = ctx2d(canvas);
+  const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = id.data;
+  let dirty = false;
+  for (let i = 3; i < d.length; i += 4) {
+    if (d[i] !== 255) {
+      d[i] = 255;
+      dirty = true;
+    }
+  }
+  if (dirty) ctx.putImageData(id, 0, 0);
+}
+
 const blur: Op = (canvas, p, u) => {
   const r = pn(p, "radius", 0) * u;
   if (r <= 0) return;
@@ -87,6 +110,7 @@ const blur: Op = (canvas, p, u) => {
       }
       ctx.globalAlpha = 1;
     });
+    opaquify(canvas);
     return;
   }
 
@@ -103,6 +127,7 @@ const blur: Op = (canvas, p, u) => {
       }
       ctx.globalAlpha = 1;
     });
+    opaquify(canvas);
     return;
   }
 
@@ -130,6 +155,7 @@ const blur: Op = (canvas, p, u) => {
       sctx.fillRect(0, 0, W, H);
       ctx.drawImage(sharp, 0, 0);
     });
+    opaquify(canvas);
     return;
   }
 
@@ -140,6 +166,7 @@ const blur: Op = (canvas, p, u) => {
     ctx.drawImage(snap, -r, -r, W + 2 * r, H + 2 * r);
     ctx.filter = "none";
   });
+  opaquify(canvas);
 };
 
 // ---------------------------------------------------------------- pixelate

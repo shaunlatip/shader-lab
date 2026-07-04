@@ -105,6 +105,14 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "blur", params: { radius: 12, mode: "directional", angle: 30 } }],
   },
   {
+    label: "Blur · radial",
+    stack: [{ type: "blur", params: { radius: 12, mode: "radial" } }],
+  },
+  {
+    label: "Blur · tilt shift",
+    stack: [{ type: "blur", params: { radius: 10, mode: "tiltShift" } }],
+  },
+  {
     label: "Bloom",
     stack: [{ type: "bloom", params: {} }],
   },
@@ -151,6 +159,47 @@ interface ParityResult {
   maxDelta: number;
   meanDelta: number;
   pctDiffPixels: number;
+}
+
+function minAlpha(id: ImageData): number {
+  let min = 255;
+  const d = id.data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < min) min = d[i];
+  return min;
+}
+
+// Automation hook: window.__parity lets a driven browser run any config and
+// read structured results without clicking through the UI. Dev-only page, so
+// the global is deliberate. minAlpha catches opacity bugs (e.g. the CPU blur
+// edge-alpha quirk) that rgb-only inspection misses.
+let hookImage: HTMLImageElement | null = null;
+async function runParityByLabel(label: string) {
+  const test = TEST_CONFIGS.find((t) => t.label === label);
+  if (!test) throw new Error(`unknown config: ${label}`);
+  hookImage ??= await loadTestImage();
+  const config = buildConfig(test);
+  const glCanvas = document.createElement("canvas");
+  const cpuCanvas = document.createElement("canvas");
+  renderOnce("gl", glCanvas, config, DIMS, hookImage);
+  renderOnce("cpu", cpuCanvas, config, DIMS, hookImage);
+  const glData = glCanvas.getContext("2d")!.getImageData(0, 0, DIMS.W, DIMS.H);
+  const cpuData = cpuCanvas.getContext("2d")!.getImageData(0, 0, DIMS.W, DIMS.H);
+  return { ...diffImageData(glData, cpuData), minAlphaGl: minAlpha(glData), minAlphaCpu: minAlpha(cpuData) };
+}
+async function benchByLabel(label: string) {
+  const test = TEST_CONFIGS.find((t) => t.label === label);
+  if (!test) throw new Error(`unknown config: ${label}`);
+  hookImage ??= await loadTestImage();
+  const config = buildConfig(test);
+  return { gl: benchEngine("gl", config, DIMS, hookImage), cpu: benchEngine("cpu", config, DIMS, hookImage) };
+}
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__parity = {
+    labels: () => TEST_CONFIGS.map((t) => t.label),
+    hasWebGL2: () => hasRealWebGL2(),
+    run: runParityByLabel,
+    bench: benchByLabel,
+  };
 }
 
 function diffImageData(a: ImageData, b: ImageData): ParityResult {
