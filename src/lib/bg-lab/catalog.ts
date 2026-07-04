@@ -644,6 +644,29 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "specular", label: "Specular", min: 0, max: 1, step: 0.01, default: 0.35 },
     ],
   },
+  ledPanel: {
+    type: "ledPanel",
+    category: "converter",
+    label: "LED panel",
+    blurb: "RGB sub-pixel LED matrix with bezel grid",
+    controls: [
+      { kind: "slider", key: "size", label: "Cell size", min: 6, max: 48, step: 1, default: 14, unit: true },
+      { kind: "slider", key: "gap", label: "Bezel gap", min: 0, max: 0.45, step: 0.01, default: 0.18 },
+      { kind: "switch", key: "stagger", label: "Stagger", default: false },
+      { kind: "slider", key: "glow", label: "Glow", min: 0, max: 1, step: 0.01, default: 0.25 },
+    ],
+  },
+  crochet: {
+    type: "crochet",
+    category: "converter",
+    label: "Crochet",
+    blurb: "Yarn V-stitches over fabric rows",
+    controls: [
+      { kind: "slider", key: "size", label: "Stitch size", min: 8, max: 48, step: 1, default: 18, unit: true },
+      { kind: "slider", key: "yarnWidth", label: "Yarn width", min: 0.1, max: 0.5, step: 0.01, default: 0.3 },
+      { kind: "color", key: "paper", label: "Fabric", default: "#2a2320" },
+    ],
+  },
   lineArt: {
     type: "lineArt",
     category: "converter",
@@ -762,6 +785,8 @@ export const EFFECT_ORDER: EffectType[] = [
   "lego",
   "receipt",
   "flutedGlass",
+  "ledPanel",
+  "crochet",
   "pixelate",
   "dither",
   "halftone",

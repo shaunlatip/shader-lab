@@ -43,6 +43,8 @@ export type EffectType =
   | "lego"
   | "receipt"
   | "flutedGlass"
+  | "ledPanel"
+  | "crochet"
   // post parity (Phase 4)
   | "crtCurvature"
   | "glitch"

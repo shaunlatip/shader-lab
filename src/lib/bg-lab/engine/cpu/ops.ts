@@ -1092,6 +1092,173 @@ const flutedGlass: Op = (canvas, p, u) => {
   ctx.putImageData(out, 0, 0);
 };
 
+// ---------------------------------------------------------------- ledPanel
+// RGB sub-pixel LED matrix — the exact per-pixel mirror of the GL pass
+// (shaders.ts `ledPanel`). Spec (must stay in lockstep):
+//   cell      cell = max(4, round(size*u)); integer px x=floor(px.x), y=floor(px.y).
+//   stagger   cx = floor(x/cell); if stagger && cx odd: yEff = y + floor(cell/2)
+//             else yEff = y; cy = floor(yEff/cell). lx = x - cx*cell,
+//             ly = yEff - cy*cell (cell-local ints).
+//   sample    NEAREST src at the cell's drawn visual center: sxc = min(W-1,
+//             cx*cell + floor(cell/2)); syc = min(H-1, cy*cell + floor(cell/2)
+//             - (stagger && cx odd ? floor(cell/2) : 0)) — undoes the stagger
+//             shift so the sample lands on the unstaggered image.
+//   strips    bezel inset b = round(gap*cell*0.5); inX0 = b, inW = cell-2b,
+//             inY0 = b, inY1 = cell-b. 3 vertical strips (R,G,B) each
+//             inW/3 wide with a 1px gap on either side; strip k's rect:
+//             x in [inX0 + k*inW/3 + 0.5, inX0 + (k+1)*inW/3 - 0.5],
+//             y in [b, cell-b]. dPx = axis-aligned box SDF (in px) from
+//             (lx+0.5, ly+0.5) to that rect; mask = aaCov(dPx).
+//   emissive  k = which third lx falls in (only evaluate that strip — they're
+//             disjoint); v = src channel k (0..1); contribution = primary_k*v*mask.
+//   glow      out = stripContribution + glow*0.12*srcRGB (faint full-cell wash),
+//             clamped 0..1 per channel. Bezel background is black + the wash.
+const ledPanel: Op = (canvas, p, u) => {
+  const { ctx, img, d: src, W, H } = getData(canvas);
+  const cell = Math.max(4, Math.round(pn(p, "size", 14) * u));
+  const gap = pn(p, "gap", 0.18);
+  const stagger = pb(p, "stagger", false);
+  const glow = pn(p, "glow", 0.25);
+  const half = Math.floor(cell / 2);
+  const b = Math.round(gap * cell * 0.5);
+  const inX0 = b;
+  const inW = cell - 2 * b;
+  const inY0 = b;
+  const inY1 = cell - b;
+  const out = ctx.createImageData(W, H);
+  const o = out.data;
+  const aaCov = (dPx: number) => clamp(0.5 - dPx, 0, 1);
+  const primaries: [number, number, number][] = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const cx = Math.floor(x / cell);
+      const oddCol = (((cx % 2) + 2) % 2) === 1;
+      const yEff = stagger && oddCol ? y + half : y;
+      const cy = Math.floor(yEff / cell);
+      const lx = x - cx * cell;
+      const ly = yEff - cy * cell;
+      const sxc = Math.min(W - 1, cx * cell + half);
+      const syc = Math.min(H - 1, cy * cell + half - (stagger && oddCol ? half : 0));
+      const si = (syc * W + sxc) * 4;
+      const srcR = src[si] / 255,
+        srcG = src[si + 1] / 255,
+        srcB = src[si + 2] / 255;
+      let rC = 0,
+        gC = 0,
+        bC = 0;
+      if (inW > 0 && lx >= inX0 && lx < cell - inX0 && ly >= inY0 && ly < inY1) {
+        let k = Math.floor(((lx - inX0) * 3) / inW);
+        if (k < 0) k = 0;
+        if (k > 2) k = 2;
+        const rx0 = inX0 + (k * inW) / 3 + 0.5;
+        const rx1 = inX0 + ((k + 1) * inW) / 3 - 0.5;
+        const ry0 = inY0;
+        const ry1 = inY1;
+        const cx0 = (rx0 + rx1) / 2,
+          hx = (rx1 - rx0) / 2;
+        const cy0 = (ry0 + ry1) / 2,
+          hy = (ry1 - ry0) / 2;
+        const px = lx + 0.5 - cx0,
+          py = ly + 0.5 - cy0;
+        const ddx = Math.abs(px) - hx,
+          ddy = Math.abs(py) - hy;
+        const dPx = Math.sqrt(Math.max(ddx, 0) ** 2 + Math.max(ddy, 0) ** 2) + Math.min(Math.max(ddx, ddy), 0);
+        const mask = aaCov(dPx);
+        const v = k === 0 ? srcR : k === 1 ? srcG : srcB;
+        const [pr, pg, pb2] = primaries[k];
+        rC = pr * v * mask;
+        gC = pg * v * mask;
+        bC = pb2 * v * mask;
+      }
+      rC += glow * 0.12 * srcR;
+      gC += glow * 0.12 * srcG;
+      bC += glow * 0.12 * srcB;
+      const di = (y * W + x) * 4;
+      o[di] = Math.round(clamp(rC, 0, 1) * 255);
+      o[di + 1] = Math.round(clamp(gC, 0, 1) * 255);
+      o[di + 2] = Math.round(clamp(bC, 0, 1) * 255);
+      o[di + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+};
+
+// ---------------------------------------------------------------- crochet
+// Yarn V-stitch lattice — the exact per-pixel mirror of the GL pass
+// (shaders.ts `crochet`). Spec (must stay in lockstep):
+//   cell      cell = max(6, round(size*u)); integer px.
+//   brick     row = floor(y/cell); xEff = x + (row odd ? floor(cell/2) : 0);
+//             col = floor(xEff/cell); lx = xEff - col*cell, ly = y - row*cell.
+//             p = (lx - cell/2 + 0.5, ly - cell/2 + 0.5) — centered local px.
+//   sample    NEAREST src at the stitch's drawn visual center: sxc = clamp(
+//             col*cell + floor(cell/2) - (row odd ? floor(cell/2) : 0), 0, W-1);
+//             syc = clamp(row*cell + floor(cell/2), 0, H-1).
+//             yarn = clamp(src*1.08, 0..1) (warmed/saturated, multiplicative).
+//   V stitch  two lobes s in {-1,+1} at constant angle 38° (cosA/sinA computed
+//             once in f64, not per-pixel data-dependent trig): q = (p.x +
+//             s*cell*0.14, p.y); rotate q by s*38°: pr = (cA*q.x - s*sA*q.y,
+//             s*sA*q.x + cA*q.y); squash: pe = (pr.x, pr.y/0.55); d =
+//             length(pe) - cell*0.30; dPx = abs(d) - yarnWidth*cell*0.5;
+//             mask_s = aaCov(dPx). mask = max(mask_-1, mask_+1).
+//   out       mix(paper, yarn, mask).
+const DEG38 = (38 * Math.PI) / 180;
+const COS38 = Math.cos(DEG38);
+const SIN38 = Math.sin(DEG38);
+const crochet: Op = (canvas, p, u) => {
+  const { ctx, img, d: src, W, H } = getData(canvas);
+  const cell = Math.max(6, Math.round(pn(p, "size", 18) * u));
+  const yarnWidth = pn(p, "yarnWidth", 0.3);
+  const [papR, papG, papB] = hexRGB(ps(p, "paper", "#2a2320"));
+  const half = Math.floor(cell / 2);
+  const out = ctx.createImageData(W, H);
+  const o = out.data;
+  const aaCov = (dPx: number) => clamp(0.5 - dPx, 0, 1);
+  const ringR = cell * 0.3;
+  const strokeHalf = yarnWidth * cell * 0.5;
+  const lobeOffset = cell * 0.14;
+  for (let y = 0; y < H; y++) {
+    const row = Math.floor(y / cell);
+    const oddRow = (((row % 2) + 2) % 2) === 1;
+    const ly = y - row * cell;
+    for (let x = 0; x < W; x++) {
+      const xEff = x + (oddRow ? half : 0);
+      const col = Math.floor(xEff / cell);
+      const lx = xEff - col * cell;
+      const px = lx - cell / 2 + 0.5;
+      const py = ly - cell / 2 + 0.5;
+      const sxc = clamp(col * cell + half - (oddRow ? half : 0), 0, W - 1);
+      const syc = clamp(row * cell + half, 0, H - 1);
+      const si = (syc * W + sxc) * 4;
+      const yarnR = clamp(Math.round(src[si] * 1.08), 0, 255);
+      const yarnG = clamp(Math.round(src[si + 1] * 1.08), 0, 255);
+      const yarnB = clamp(Math.round(src[si + 2] * 1.08), 0, 255);
+      let mask = 0;
+      for (const s of [-1, 1]) {
+        const qx = px + s * lobeOffset;
+        const qy = py;
+        const prx = COS38 * qx - s * SIN38 * qy;
+        const pry = s * SIN38 * qx + COS38 * qy;
+        const pex = prx;
+        const pey = pry / 0.55;
+        const d = Math.sqrt(pex * pex + pey * pey) - ringR;
+        const dPx = Math.abs(d) - strokeHalf;
+        const m = aaCov(dPx);
+        if (m > mask) mask = m;
+      }
+      const di = (y * W + x) * 4;
+      o[di] = Math.round(papR + (yarnR - papR) * mask);
+      o[di + 1] = Math.round(papG + (yarnG - papG) * mask);
+      o[di + 2] = Math.round(papB + (yarnB - papB) * mask);
+      o[di + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+};
+
 export const OPS: Record<EffectType, Op> = {
   adjust,
   blur,
@@ -1124,6 +1291,8 @@ export const OPS: Record<EffectType, Op> = {
   lego,
   receipt,
   flutedGlass,
+  ledPanel,
+  crochet,
   lineArt,
   kuwahara,
   // post parity

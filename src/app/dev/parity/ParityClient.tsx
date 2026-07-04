@@ -49,6 +49,14 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "flutedGlass", params: { amount: 0.6 } }],
   },
   {
+    label: "LED panel",
+    stack: [{ type: "ledPanel" }],
+  },
+  {
+    label: "Crochet",
+    stack: [{ type: "crochet" }],
+  },
+  {
     label: "Dither · Bayer 4x4",
     stack: [{ type: "dither", params: { type: "bayer4" } }],
   },
