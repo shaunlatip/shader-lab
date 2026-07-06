@@ -90,7 +90,7 @@ export function SavedPanel() {
                 <span className="text-[11px] text-text-secondary">{g}</span>
                 <div className="flex flex-wrap gap-1.5">
                   {members.map((s) => (
-                    <Chip key={s.id} set={s} onApply={() => applyStack(s.stack)} />
+                    <Chip key={s.id} set={s} onApply={() => applyStack(s.stack, s.source)} />
                   ))}
                 </div>
               </div>

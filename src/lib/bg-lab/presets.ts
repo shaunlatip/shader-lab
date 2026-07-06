@@ -2,7 +2,7 @@
 
 import { nanoid } from "nanoid";
 import { defaultParams, EFFECT_CATALOG } from "./catalog";
-import type { BgConfig, Effect, EffectType, ParamValue } from "./types";
+import type { BgConfig, Effect, EffectType, ParamValue, SourceState } from "./types";
 
 export interface GalleryImage {
   id: string;
@@ -79,6 +79,10 @@ export interface Preset {
    * scannable clusters. Every preset belongs to exactly one group. */
   group: PresetGroup;
   build: () => Effect[];
+  /** Optional source the preset carries (generative-source looks — clouds,
+   * caustics, sky). Merged into the current source on apply; presets without
+   * it keep the user's source, as before. */
+  source?: Partial<SourceState>;
 }
 
 export const PRESET_GROUPS = [
@@ -399,6 +403,23 @@ export const PRESETS: Preset[] = [
     group: "Retro screen",
     build: () => [withParams("chromatic", { amount: 8, samples: 8, quality: "high" }), withParams("grain", { amount: 0.08 })],
   },
+  {
+    name: "Vaporwave",
+    group: "Retro screen",
+    build: () => [
+      withParams("chromatic", { amount: 6, mode: "split" }),
+      withParams("scanlines", { spacing: 4, intensity: 0.3 }),
+      withParams("gradientMap", {
+        stops: [
+          { t: 0, color: "#2b0a4e" },
+          { t: 0.5, color: "#e83fb8" },
+          { t: 1, color: "#7df9ff" },
+        ],
+        amount: 0.75,
+      }),
+      withParams("grain", { amount: 0.12 }),
+    ],
+  },
   // --- Warp & texture ---
   {
     name: "Warp",
@@ -424,6 +445,35 @@ export const PRESETS: Preset[] = [
     name: "Vignette fade",
     group: "Warp & texture",
     build: () => [withParams("adjust", { contrast: 1.1 }), withParams("vignette", { amount: 0.8, radius: 0.7 })],
+  },
+  // Generative-source looks — these carry a `source` (clouds/caustics/sky
+  // pattern) and replace it on apply, unlike every preset above.
+  {
+    name: "Storybook clouds",
+    group: "Warp & texture",
+    source: {
+      mode: "pattern",
+      pattern: { type: "clouds", cell: 22, weight: 0.5, jitter: 0.35, angle: 35, stagger: false, fg: "#f7f2e8", bg: "#8fb8d8" },
+    },
+    build: () => [withParams("grain", { amount: 0.1 }), withParams("vignette", { amount: 0.25 })],
+  },
+  {
+    name: "Poolside",
+    group: "Warp & texture",
+    source: {
+      mode: "pattern",
+      pattern: { type: "caustics", cell: 40, weight: 0.4, jitter: 0.3, angle: 0, stagger: true, fg: "#eafcff", bg: "#1f8ba8" },
+    },
+    build: () => [withParams("bloom", { intensity: 0.5, threshold: 0.6 }), withParams("tint", { color: "#9fe8f0", opacity: 0.15, blend: "screen" })],
+  },
+  {
+    name: "Sundown sky",
+    group: "Warp & texture",
+    source: {
+      mode: "pattern",
+      pattern: { type: "sky", cell: 36, weight: 0.6, jitter: 0.35, angle: 25, stagger: false, fg: "#f2a65a", bg: "#2d4a7a" },
+    },
+    build: () => [withParams("grain", { amount: 0.08 })],
   },
   // --- Grades ---
   {
@@ -487,6 +537,33 @@ export const PRESETS: Preset[] = [
     build: () => [
       withParams("gradientMap", { stops: [{ t: 0, color: "#06122a" }, { t: 0.5, color: "#1ea7b6" }, { t: 1, color: "#f06" }], amount: 0.6 }),
       withParams("chromatic", { amount: 4 }),
+    ],
+  },
+  {
+    name: "Golden hour",
+    group: "Grades",
+    build: () => [
+      withParams("lightRays", { y: 22, threshold: 0.55, strength: 0.9, color: "#ffcf9a" }),
+      withParams("tint", { color: "#e8a86a", opacity: 0.2, blend: "soft-light" }),
+      withParams("vignette", { amount: 0.35 }),
+    ],
+  },
+  {
+    name: "God rays",
+    group: "Grades",
+    build: () => [
+      withParams("adjust", { contrast: 1.1 }),
+      withParams("lightRays", { samples: 48, density: 0.95, decay: 0.94, strength: 1.1 }),
+      withParams("grain", { amount: 0.08 }),
+    ],
+  },
+  {
+    name: "Brushwork",
+    group: "Painterly & ink",
+    build: () => [
+      withParams("kuwahara", { quality: "anisotropic", radius: 7, anisotropy: 1.6 }),
+      withParams("adjust", { saturation: 1.15 }),
+      withParams("grain", { amount: 0.06 }),
     ],
   },
 ];

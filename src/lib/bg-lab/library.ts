@@ -14,6 +14,9 @@ export interface SavedEffect {
   builtin?: boolean;
   /** Section header for builtins (user saves have none). */
   group?: PresetGroup;
+  /** Source carried by generative-source builtins (clouds/caustics/sky) —
+   * merged into the editor source on apply. User saves never have one. */
+  source?: Partial<SourceState>;
 }
 
 /** A named snapshot of the whole editor (source + output + stack). */
@@ -28,7 +31,7 @@ export const DRAFTS_KEY = "bg-lab/drafts/v1";
 
 /** Built-in preset looks, materialized as saved effects. */
 export function builtinSaved(): SavedEffect[] {
-  return PRESETS.map((p, i) => ({ id: `builtin-${i}`, name: p.name, stack: p.build(), builtin: true, group: p.group }));
+  return PRESETS.map((p, i) => ({ id: `builtin-${i}`, name: p.name, stack: p.build(), builtin: true, group: p.group, source: p.source }));
 }
 
 /** Fresh ids + cloned params so a loaded stack is independent of the stored one. */
