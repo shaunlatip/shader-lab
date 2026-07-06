@@ -815,6 +815,16 @@ export const EFFECT_ORDER: EffectType[] = [
   "vignette",
 ];
 
+// Dev-only sanity: EFFECT_ORDER must be a duplicate-free permutation of the
+// catalog keys — a missed entry silently hides an effect from the add menu.
+if (process.env.NODE_ENV !== "production") {
+  const order = new Set(EFFECT_ORDER);
+  if (order.size !== EFFECT_ORDER.length) throw new Error("EFFECT_ORDER contains duplicates");
+  for (const type of Object.keys(EFFECT_CATALOG)) {
+    if (!order.has(type as EffectType)) throw new Error(`EFFECT_ORDER is missing "${type}"`);
+  }
+}
+
 function cloneStops(stops: GradientStop[]): GradientStop[] {
   return stops.map((s) => ({ ...s }));
 }

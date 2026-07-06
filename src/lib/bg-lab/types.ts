@@ -73,18 +73,23 @@ export interface SourceTransform {
   crop?: { x: number; y: number; w: number; h: number };
 }
 
-export type PatternType =
-  | "dotGrid"
-  | "lineGrid"
-  | "checker"
-  | "stripes"
-  | "rings"
-  | "iso"
-  | "moire"
-  | "hex"
-  | "truchet"
-  | "voronoi"
-  | "fbm";
+/** Runtime list so schema validation can check pasted pattern types — a const
+ * array of literals keeps this file serialization-clean. */
+export const PATTERN_TYPES = [
+  "dotGrid",
+  "lineGrid",
+  "checker",
+  "stripes",
+  "rings",
+  "iso",
+  "moire",
+  "hex",
+  "truchet",
+  "voronoi",
+  "fbm",
+] as const;
+
+export type PatternType = (typeof PATTERN_TYPES)[number];
 
 export interface PatternState {
   type: PatternType;

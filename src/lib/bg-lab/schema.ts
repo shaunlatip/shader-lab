@@ -4,8 +4,9 @@
 
 import { nanoid } from "nanoid";
 import { EFFECT_CATALOG, EFFECT_ORDER, controlDefault, defaultParams, type ControlSpec } from "./catalog";
+import { DEFAULT_PATTERN, PATTERN_CONTROLS } from "./patternCatalog";
 import { makeDefaultConfig } from "./presets";
-import type { BgConfig, Effect, EffectType, GradientStop, ParamValue } from "./types";
+import type { BgConfig, Effect, EffectType, GradientStop, ParamValue, PatternState } from "./types";
 
 const clampNum = (v: unknown, min: number, max: number, step: number, def: number): number => {
   let n = typeof v === "number" ? v : Number(v);
@@ -52,6 +53,16 @@ export function clampParams(type: EffectType, raw: unknown): Record<string, Para
 
 const isEffectType = (t: unknown): t is EffectType => typeof t === "string" && t in EFFECT_CATALOG;
 
+/** coerce a pasted pattern block to a valid PatternState (total, like clampParams) */
+function clampPattern(raw: unknown): PatternState {
+  const src = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const out: Record<string, ParamValue> = { ...DEFAULT_PATTERN };
+  for (const spec of PATTERN_CONTROLS) {
+    if (spec.key in src) out[spec.key] = clampOne(spec, src[spec.key]);
+  }
+  return out as unknown as PatternState;
+}
+
 /** parse + validate a pasted config; throws Error with a human message on failure */
 export function validateConfig(text: string): BgConfig {
   let raw: unknown;
@@ -76,9 +87,10 @@ export function validateConfig(text: string): BgConfig {
   const source = { ...base.source };
   if (o.source && typeof o.source === "object") {
     const so = o.source as Record<string, unknown>;
-    if (so.mode === "solid" || so.mode === "image" || so.mode === "video") source.mode = so.mode;
+    if (so.mode === "solid" || so.mode === "image" || so.mode === "video" || so.mode === "pattern") source.mode = so.mode;
     if (typeof so.imageId === "string" || so.imageId === null) source.imageId = so.imageId as string | null;
     if (typeof so.solidColor === "string" && /^#[0-9a-fA-F]{6}$/.test(so.solidColor)) source.solidColor = so.solidColor;
+    if (so.mode === "pattern" || so.pattern) source.pattern = clampPattern(so.pattern);
     if (so.transform && typeof so.transform === "object") {
       const t = so.transform as Record<string, unknown>;
       const tf: NonNullable<BgConfig["source"]["transform"]> = {};
@@ -127,6 +139,19 @@ function schemaLines(): string {
   }).join("\n");
 }
 
+/** the pattern-source schema line, generated from the pattern catalog (can't drift) */
+function patternSchemaLine(): string {
+  const parts = PATTERN_CONTROLS.map((c) => {
+    if (c.kind === "slider") return `${c.key}: ${c.min}–${c.max}`;
+    if (c.kind === "select") return `${c.key}: ${c.options.map((o) => o.value).join("|")}`;
+    if (c.kind === "switch") return `${c.key}: bool`;
+    if (c.kind === "color") return `${c.key}: #rrggbb`;
+    if (c.kind === "text") return `${c.key}: string`;
+    return `${c.key}: [{t:0..1,color:#rrggbb}, …]`;
+  });
+  return `  pattern  { ${parts.join(", ")} }`;
+}
+
 /** build the full prompt the user copies into Claude / any LLM */
 export function buildPrompt(config: BgConfig): string {
   return `You are configuring a layered canvas "background editor". Return ONLY a JSON object
@@ -135,13 +160,16 @@ export function buildPrompt(config: BgConfig): string {
 {
   "version": 1,
   "output": { "aspect": "3:2"|"4:3"|"16:9"|"21:9"|"1:1"|"2:3"|"9:16" | {"w":N,"h":N}, "longEdge": 200-6000 },
-  "source": { "mode": "image"|"solid", "imageId": string|null, "solidColor": "#rrggbb" },
+  "source": { "mode": "image"|"solid"|"pattern", "imageId": string|null, "solidColor": "#rrggbb", "pattern": {…} },
   "stack": [ { "id": string, "type": EffectType, "enabled": bool, "params": {…} }, … ]
 }
 
 The stack is ordered top→bottom = render order; reorder by reordering the array.
 Each effect's params (clamp values to these ranges):
 ${schemaLines()}
+
+When "mode" is "pattern", "pattern" is a generated source (only then):
+${patternSchemaLine()}
 
 RULES
 - Output the FULL config (keep ids you didn't change; invent short ids for new effects).

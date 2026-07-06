@@ -17,6 +17,9 @@ const BENCH_FRAMES = 60;
 interface TestConfig {
   label: string;
   stack: { type: EffectType; params?: Record<string, ParamValue> }[];
+  /** fixed render time for animated effects — pick a value that lands mid-step,
+   * not on a discrete boundary. Omitted = engine clock at t≈0 (static). */
+  time?: number;
 }
 
 const TEST_CONFIGS: TestConfig[] = [
@@ -218,8 +221,8 @@ async function runParityByLabel(label: string) {
   const config = buildConfig(test);
   const glCanvas = document.createElement("canvas");
   const cpuCanvas = document.createElement("canvas");
-  renderOnce("gl", glCanvas, config, DIMS, hookImage);
-  renderOnce("cpu", cpuCanvas, config, DIMS, hookImage);
+  renderOnce("gl", glCanvas, config, DIMS, hookImage, test.time);
+  renderOnce("cpu", cpuCanvas, config, DIMS, hookImage, test.time);
   const glData = glCanvas.getContext("2d")!.getImageData(0, 0, DIMS.W, DIMS.H);
   const cpuData = cpuCanvas.getContext("2d")!.getImageData(0, 0, DIMS.W, DIMS.H);
   return { ...diffImageData(glData, cpuData), minAlphaGl: minAlpha(glData), minAlphaCpu: minAlpha(cpuData) };
@@ -383,8 +386,8 @@ export default function ParityClient() {
       const cpuCanvas = cpuCanvasRef.current;
       if (!glCanvas || !cpuCanvas) throw new Error("canvas refs not mounted");
 
-      renderOnce("gl", glCanvas, config, DIMS, img);
-      renderOnce("cpu", cpuCanvas, config, DIMS, img);
+      renderOnce("gl", glCanvas, config, DIMS, img, selected.time);
+      renderOnce("cpu", cpuCanvas, config, DIMS, img, selected.time);
 
       // Both engines draw into `target` via an internal drawImage/2D composite
       // (the GL engine keeps its own offscreen WebGL canvas and blits from it),
