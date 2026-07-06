@@ -29,6 +29,7 @@ export type EffectType =
   | "bloom"
   | "sharpen"
   | "displace"
+  | "lightRays"
   // converters / styles
   | "ascii"
   | "blockChars"

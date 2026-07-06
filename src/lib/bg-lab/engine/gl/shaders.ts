@@ -1495,6 +1495,64 @@ const blur: GpuPass = {
   },
 };
 
+// ---------------------------------------------------------------- lightRays
+// GPU accelerator for the CPU `lightRays` op (ops.ts) — the two implement ONE
+// spec: bloom's exact 8-bit bright threshold, integer texel sample positions
+// floor(p + delta*(i+t0) + 0.5) idx-clamped, iterative decay weights, and a
+// per-pixel blue-noise ray phase t0 from the shared BLUE_NOISE_128 table
+// (F4 sampler — same bytes the CPU indexes). u_strengthNorm and u_densN are
+// TS-computed (f64) so both engines see identical scalars. Parity tier is
+// statistical: the only cross-engine divergence is rare f32/f64 floor ties on
+// sample positions (one bright texel on one of N samples).
+const lightRays: GpuPass = {
+  samplers: [{ name: "u_bn", key: "blueNoise128" }],
+  frag: f(`const int N_MAX = 64;
+uniform vec2 u_light; uniform float u_thr255; uniform int u_samples;
+uniform float u_densN; uniform float u_decay; uniform float u_strengthNorm;
+uniform vec3 u_color; uniform float u_blend;
+uniform sampler2D u_bn;
+vec3 nearestTexel(vec2 samplePos){
+  vec2 idx=clamp(floor(samplePos+0.5), vec2(0.0), u_dims-1.0);
+  return texture(u_tex, vec2((idx.x+0.5)/u_dims.x, 1.0-(idx.y+0.5)/u_dims.y)).rgb;
+}
+void main(){
+  vec2 px=floor(vec2(v_uv.x, 1.0-v_uv.y)*u_dims); // integer x,y (top-left origin), matches CPU loop
+  vec3 base=nearestTexel(px);
+  float srcAlpha=texture(u_tex,v_uv).a;
+  ivec2 ip=ivec2(px);
+  float bn=floor(texelFetch(u_bn, ivec2(ip.x & 127, ip.y & 127), 0).r*255.0 + 0.5);
+  float t0=(bn+0.5)/256.0;
+  vec2 delta=(u_light-px)*u_densN;
+  vec3 acc=vec3(0.0);
+  float w=1.0;
+  for(int i=0;i<N_MAX;i++){
+    if(i>=u_samples) break;
+    vec3 c8=floor(nearestTexel(px+delta*(float(i)+t0))*255.0+0.5);
+    if(luma601(c8)>=u_thr255) acc+=(c8/255.0)*w;
+    w*=u_decay;
+  }
+  vec3 rays=acc*u_strengthNorm*u_color;
+  vec3 outc = u_blend>0.5
+    ? 1.0-(1.0-base)*(1.0-clamp(rays,vec3(0.0),vec3(1.0)))
+    : clamp(base+rays, 0.0, 1.0);
+  o=vec4(clamp(outc,0.0,1.0), srcAlpha);
+}`),
+  setUniforms: (gl, prog, p, u, t, dims) => {
+    const N = Math.max(1, Math.round(pn(p, "samples", 32)));
+    const decay = pn(p, "decay", 0.95);
+    const norm = decay < 1 ? (1 - decay) / (1 - Math.pow(decay, N)) : 1 / N;
+    gl.uniform2f(loc(gl, prog, "u_light"), (pn(p, "x", 50) / 100) * dims.w, (pn(p, "y", 25) / 100) * dims.h);
+    gl.uniform1f(loc(gl, prog, "u_thr255"), pn(p, "threshold", 0.6) * 255);
+    gl.uniform1i(loc(gl, prog, "u_samples"), N);
+    gl.uniform1f(loc(gl, prog, "u_densN"), pn(p, "density", 0.8) / N);
+    gl.uniform1f(loc(gl, prog, "u_decay"), decay);
+    gl.uniform1f(loc(gl, prog, "u_strengthNorm"), pn(p, "strength", 0.7) * norm);
+    const [r, g, b] = hexRGB(ps(p, "color", "#ffe3b8"));
+    gl.uniform3f(loc(gl, prog, "u_color"), r / 255, g / 255, b / 255);
+    gl.uniform1f(loc(gl, prog, "u_blend"), ps(p, "blend", "screen") === "screen" ? 1 : 0);
+  },
+};
+
 // ---------------------------------------------------------------- bloom / characterBloom (multi-pass)
 // Both CPU ops (ops.ts `bloom`, postfx.ts `characterBloom`) are byte-identical
 // 4-step pipelines differing only in default param values — so the GL side
@@ -1886,6 +1944,7 @@ export const GL_OPS: Partial<Record<EffectType, GpuPass>> = {
   lineArt,
   blur,
   bloom,
+  lightRays,
   characterBloom,
   ascii: glyphs,
   blockChars: glyphs,

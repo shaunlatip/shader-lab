@@ -25,6 +25,7 @@ import {
 
 import { renderGlyph, braille, mosaic, lego, lineArt, kuwahara } from "./converters";
 import { crtCurvature, glitch, filmDust, characterBloom } from "./postfx";
+import { BLUE_NOISE_128 } from "../bluenoise";
 
 type Op = (canvas: HTMLCanvasElement, p: Record<string, ParamValue>, u: number, t?: number) => void;
 
@@ -1262,6 +1263,82 @@ const crochet: Op = (canvas, p, u) => {
   ctx.putImageData(out, 0, 0);
 };
 
+// ---------------------------------------------------------------- lightRays
+// Screen-space crepuscular rays (Heckel volumetric-lighting, 2D subset +
+// GPU Gems 3 ch.13): bright pixels are emitters; each pixel gathers N samples
+// along the ray toward the light with Beer-style decay. ONE spec with the GL
+// pass: bright threshold uses bloom's exact 8-bit snap; sample positions are
+// integer texel picks floor(p + delta*(i + t0) + 0.5) idx-clamped; t0 is a
+// per-pixel blue-noise ray phase (shared BLUE_NOISE_128 table) that hides
+// banding at low sample counts. Parity tier is statistical (rare f32/f64
+// floor ties on sample positions), targets in ParityClient.
+const lightRays: Op = (canvas, p) => {
+  const strength = pn(p, "strength", 0.7);
+  if (strength <= 0) return;
+  const { ctx, img, d, W, H } = getData(canvas);
+  const N = Math.max(1, Math.round(pn(p, "samples", 32)));
+  const thr255 = pn(p, "threshold", 0.6) * 255;
+  const density = pn(p, "density", 0.8);
+  const decay = pn(p, "decay", 0.95);
+  const lx = (pn(p, "x", 50) / 100) * W;
+  const ly = (pn(p, "y", 25) / 100) * H;
+  const [cr, cg, cb] = hexRGB(ps(p, "color", "#ffe3b8"));
+  // geometric-series normalization keeps perceived energy stable across N/decay
+  const norm = decay < 1 ? (1 - decay) / (1 - Math.pow(decay, N)) : 1 / N;
+  const k = (strength * norm) / 255; // bright buffer holds bytes; fold /255 in
+  const kr = (k * cr) / 255;
+  const kg = (k * cg) / 255;
+  const kb = (k * cb) / 255;
+  const screen = ps(p, "blend", "screen") === "screen";
+
+  // hoisted bright pass — identical to thresholding inline per sample (the
+  // decision is deterministic per texel), avoids re-computing luma N times
+  const bright = new Float32Array(W * H * 3);
+  for (let px = 0, i = 0; px < W * H; px++, i += 4) {
+    if (luma601(d[i], d[i + 1], d[i + 2]) >= thr255) {
+      const j = px * 3;
+      bright[j] = d[i];
+      bright[j + 1] = d[i + 1];
+      bright[j + 2] = d[i + 2];
+    }
+  }
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const t0 = (BLUE_NOISE_128[(y & 127) * 128 + (x & 127)] + 0.5) / 256;
+      const dx = ((lx - x) * density) / N;
+      const dy = ((ly - y) * density) / N;
+      let ar = 0;
+      let ag = 0;
+      let ab = 0;
+      let w = 1;
+      for (let i = 0; i < N; i++) {
+        const sx = Math.min(W - 1, Math.max(0, Math.floor(x + dx * (i + t0) + 0.5)));
+        const sy = Math.min(H - 1, Math.max(0, Math.floor(y + dy * (i + t0) + 0.5)));
+        const j = (sy * W + sx) * 3;
+        ar += bright[j] * w;
+        ag += bright[j + 1] * w;
+        ab += bright[j + 2] * w;
+        w *= decay;
+      }
+      const rr = ar * kr;
+      const rg = ag * kg;
+      const rb = ab * kb;
+      const pi = (y * W + x) * 4;
+      if (screen) {
+        d[pi] = 255 - (255 - d[pi]) * (1 - Math.min(1, rr));
+        d[pi + 1] = 255 - (255 - d[pi + 1]) * (1 - Math.min(1, rg));
+        d[pi + 2] = 255 - (255 - d[pi + 2]) * (1 - Math.min(1, rb));
+      } else {
+        d[pi] = Math.min(255, d[pi] + rr * 255);
+        d[pi + 1] = Math.min(255, d[pi + 1] + rg * 255);
+        d[pi + 2] = Math.min(255, d[pi + 2] + rb * 255);
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+};
+
 export const OPS: Record<EffectType, Op> = {
   adjust,
   blur,
@@ -1278,6 +1355,7 @@ export const OPS: Record<EffectType, Op> = {
   scanlines,
   vignette,
   bloom,
+  lightRays,
   sharpen,
   displace,
   // converters / styles (glyph family shares renderGlyph)

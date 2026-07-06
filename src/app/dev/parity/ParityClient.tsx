@@ -154,6 +154,17 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "bloom", params: {} }],
   },
   {
+    // Statistical tier: the only cross-engine divergence is rare f32/f64
+    // floor ties on ray sample positions (one bright texel on one of N
+    // samples). Targets: meanDelta < 0.5, pctDiffPixels < 1.5%.
+    label: "Light rays",
+    stack: [{ type: "lightRays", params: {} }],
+  },
+  {
+    label: "Light rays · long/low-decay",
+    stack: [{ type: "lightRays", params: { density: 1, decay: 0.9, samples: 64, y: 10 } }],
+  },
+  {
     label: "Chromatic · radial x8",
     stack: [{ type: "chromatic", params: { samples: 8, amount: 6 } }],
   },
