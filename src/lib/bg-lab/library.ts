@@ -3,6 +3,7 @@
 import { nanoid } from "nanoid";
 import type { BgConfig, Effect, SourceState } from "./types";
 import { EFFECT_CATALOG } from "./catalog";
+import { PATTERN_TYPE_LABEL } from "./patternCatalog";
 import { GALLERY, PRESETS, type PresetGroup } from "./presets";
 
 /** A named, reusable effect stack. `builtin` ones ship with the app. */
@@ -54,23 +55,11 @@ export function loadDrafts(): Draft[] {
   return readArray<Draft>(DRAFTS_KEY).filter((d) => d && d.config && Array.isArray(d.config.stack));
 }
 
-const PATTERN_TYPE_LABEL: Record<string, string> = {
-  dotGrid: "Dot grid",
-  lineGrid: "Line grid",
-  checker: "Checker",
-  stripes: "Stripes",
-  rings: "Rings",
-  iso: "Iso lattice",
-  moire: "Moiré",
-  hex: "Hex grid",
-  truchet: "Truchet",
-  voronoi: "Voronoi",
-  fbm: "Noise (fbm)",
-};
+// Labels live in patternCatalog (one source of truth for pattern types).
 
 /** Human label for a source, for auto-naming. */
 function sourceLabel(s: SourceState): string {
-  if (s.mode === "pattern") return "Pattern · " + (PATTERN_TYPE_LABEL[s.pattern?.type ?? ""] ?? "");
+  if (s.mode === "pattern") return "Pattern · " + (s.pattern ? (PATTERN_TYPE_LABEL[s.pattern.type] ?? "") : "");
   if (s.mode === "solid") return s.solidColor;
   const id = s.imageId;
   if (!id) return s.mode === "video" ? "Video" : "";

@@ -204,6 +204,39 @@ function drawIso(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pattern
 // any export size since the math is evaluated per output pixel, not per
 // primitive.
 
+// F1/F2 nearest-feature search (3x3 neighborhood), shared by voronoi and
+// caustics. Results land in module-level out-params instead of a returned
+// tuple — this runs once per pixel and a per-call allocation would dominate
+// the draw. `spread` scales feature jitter within its cell (keep <= 0.8 so
+// features stay inside the searched neighborhood); `seed` decorrelates layers.
+let _f1 = 0;
+let _f2 = 0;
+function voronoiF12(x: number, y: number, cell: number, spread: number, seed: number): void {
+  const px = Math.floor(x / cell);
+  const py = Math.floor(y / cell);
+  let f1 = Infinity;
+  let f2 = Infinity;
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      const ix = px + ox;
+      const iy = py + oy;
+      const fx = (ix + 0.5 + (hash2(ix + seed, iy) - 0.5) * spread) * cell;
+      const fy = (iy + 0.5 + (hash2(ix + seed + 9973, iy) - 0.5) * spread) * cell;
+      const dx = (x - fx) / cell;
+      const dy = (y - fy) / cell;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < f1) {
+        f2 = f1;
+        f1 = dist;
+      } else if (dist < f2) {
+        f2 = dist;
+      }
+    }
+  }
+  _f1 = f1;
+  _f2 = f2;
+}
+
 /** Cellular pattern via per-pixel nearest-feature-point search (3x3 neighborhood). */
 function drawVoronoi(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
   if (W * H > MAX_EXPORT_PIXELS) return; // bg already filled by caller; matches the primitive-cap doctrine
@@ -217,39 +250,15 @@ function drawVoronoi(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pat
   // continuous field.
   const cellsMode = p.stagger;
 
-  // feature point for lattice cell (ix, iy), jittered within its own cell
-  // (0.8 spread keeps it inside the 3x3 neighborhood we search below)
-  const featureX = (ix: number, iy: number) => (ix + 0.5 + (hash2(ix, iy) - 0.5) * 0.8) * cell;
-  const featureY = (ix: number, iy: number) => (iy + 0.5 + (hash2(ix + 9973, iy) - 0.5) * 0.8) * cell;
-
   for (let y = 0; y < H; y++) {
-    const py = Math.floor(y / cell);
     for (let x = 0; x < W; x++) {
-      const px = Math.floor(x / cell);
-      let f1 = Infinity;
-      let f2 = Infinity;
-      for (let oy = -1; oy <= 1; oy++) {
-        for (let ox = -1; ox <= 1; ox++) {
-          const ix = px + ox;
-          const iy = py + oy;
-          const fx = featureX(ix, iy);
-          const fy = featureY(ix, iy);
-          const dx = (x - fx) / cell;
-          const dy = (y - fy) / cell;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < f1) {
-            f2 = f1;
-            f1 = dist;
-          } else if (dist < f2) {
-            f2 = dist;
-          }
-        }
-      }
+      // seed 0 + spread 0.8 = this pattern's original constants (byte-stable)
+      voronoiF12(x, y, cell, 0.8, 0);
       let cov: number;
       if (cellsMode) {
-        cov = clamp01(0.5 + (p.weight - f1) * cell);
+        cov = clamp01(0.5 + (p.weight - _f1) * cell);
       } else {
-        const edgeD = f2 - f1;
+        const edgeD = _f2 - _f1;
         cov = clamp01(0.5 + (borderW - edgeD) * cell);
       }
       const i = (y * W + x) * 4;
@@ -343,6 +352,208 @@ function drawFbm(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pattern
   ctx.putImageData(img, 0, 0);
 }
 
+// --- generative sources round 2 (clouds, sky, caustics) ---
+// Same per-pixel ImageData approach as voronoi/fbm. Sources are static (no
+// time param — matches the drawPattern contract); both engines composite the
+// same draw into their base, so there is no CPU/GL parity surface here.
+
+/** Billowy fbm cloud mass with cheap two-tap directional shading (Heckel
+ * volumetric-cloud lighting collapsed to 2D: sample density at p and toward
+ * the light, the difference is the diffuse term — no normals).
+ * Param reinterpretation: cell = feature size, weight = edge softness,
+ * jitter = coverage, angle = light direction, fg = cloud, bg = sky.
+ * stagger is unused (reserved). */
+function drawClouds(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
+  if (W * H > MAX_EXPORT_PIXELS) return; // bg already filled by caller
+  const [fr, fg, fb] = hexRGB(p.fg);
+  const [br, bg, bb] = hexRGB(p.bg);
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+
+  const baseCell = cell * 4;
+  let ampSum = 0;
+  for (let o = 0; o < FBM_OCTAVES; o++) ampSum += 0.5 ** o;
+
+  // Per-octave domain rotation (golden angle) — value noise clumps along its
+  // lattice axes; rotating each octave decorrelates them so masses read as
+  // billows instead of rectangles.
+  const rot: { c: number; s: number; cell: number; amp: number; seed: number }[] = [];
+  {
+    let amp = 1;
+    let cellO = baseCell;
+    for (let o = 0; o < FBM_OCTAVES; o++) {
+      const a = o * 2.39996;
+      rot.push({ c: Math.cos(a), s: Math.sin(a), cell: Math.max(2, cellO), amp, seed: o * 131071 });
+      amp *= 0.5;
+      cellO *= 0.5;
+    }
+  }
+
+  // plain fbm mass (billow |2n-1| reads as filament webs, not cumulus);
+  // pow lifts contrast so masses separate into distinct clouds
+  const dens = (x: number, y: number): number => {
+    let total = 0;
+    for (let o = 0; o < FBM_OCTAVES; o++) {
+      const r = rot[o];
+      const rx = x * r.c - y * r.s;
+      const ry = x * r.s + y * r.c;
+      total += r.amp * valueNoise(rx / r.cell, ry / r.cell, r.seed);
+    }
+    return Math.pow(total / ampSum, 1.3);
+  };
+
+  const thr = 0.5 - (p.jitter - 0.25) * 0.55; // jitter = coverage bias
+  const fw = Math.max(0.04, p.weight * 0.35); // weight = edge softness
+  const ang = (p.angle * Math.PI) / 180;
+  const lx = Math.cos(ang) * cell * 0.75;
+  const ly = Math.sin(ang) * cell * 0.75;
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const dc = dens(x, y);
+      const cov = clamp01((dc - thr) / fw);
+      const i = (y * W + x) * 4;
+      if (cov <= 0) {
+        d[i] = br;
+        d[i + 1] = bg;
+        d[i + 2] = bb;
+      } else {
+        // two-tap directional derivative: density dropping toward the light
+        // means this part of the mass faces the light (lit edge)
+        const shade = (dc - dens(x + lx, y + ly)) * 3;
+        const lit = cov * Math.min(1.5, Math.max(0.3, 1 + shade));
+        const c = clamp01(lit);
+        d[i] = br + (fr - br) * c;
+        d[i + 1] = bg + (fg - bg) * c;
+        d[i + 2] = bb + (fb - bb) * c;
+      }
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/** Gradient sky with a sun disc and Henyey-Greenstein-shaped glow lobe —
+ * a "golden hour generator", not a physical atmosphere.
+ * Param reinterpretation: cell = sun size, weight = glow anisotropy,
+ * jitter = glow intensity, angle = sun position along an arc (elevation +
+ * azimuth from one dial), fg = horizon tint, bg = zenith tint.
+ * stagger is unused (reserved). */
+function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
+  if (W * H > MAX_EXPORT_PIXELS) return;
+  const [fr, fg, fb] = hexRGB(p.fg);
+  const [br, bg, bb] = hexRGB(p.bg);
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+
+  const a = (p.angle * Math.PI) / 180;
+  const elev = Math.abs(Math.sin(a));
+  const sx = W * (0.5 + 0.42 * Math.cos(a));
+  const sy = H * (0.92 - 0.78 * elev);
+  const r = Math.max(3, cell);
+  const diag = Math.sqrt(W * W + H * H);
+
+  // HG phase normalized to 1 at the sun: hg/hgMax = (1-g)^3 / (1+g^2-2g*cosT)^1.5
+  const g = 0.5 + p.weight * 0.45;
+  const oneMinusG3 = (1 - g) ** 3;
+  const glowAmp = p.jitter * 1.2;
+
+  // sun color: horizon tint pushed most of the way to white
+  const sr = fr + (255 - fr) * 0.7;
+  const sg = fg + (255 - fg) * 0.7;
+  const sb = fb + (255 - fb) * 0.7;
+
+  for (let y = 0; y < H; y++) {
+    // Rayleigh-ish vertical ramp: steeper tint change near the horizon
+    const t = Math.pow(y / H, 0.65);
+    const skyR = br + (fr - br) * t;
+    const skyG = bg + (fg - bg) * t;
+    const skyB = bb + (fb - bb) * t;
+    for (let x = 0; x < W; x++) {
+      const dx = x - sx;
+      const dy = y - sy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const dn = Math.min(1, dist / diag);
+      const cosT = 1 - 2 * dn * dn;
+      const hg = oneMinusG3 / Math.pow(1 + g * g - 2 * g * cosT, 1.5);
+      const glow = glowAmp * hg;
+      // 1px linear AA ramp on the disc edge (aaCov convention)
+      const disc = clamp01(0.5 + (r - dist));
+      let cr = Math.min(255, skyR + sr * glow);
+      let cg = Math.min(255, skyG + sg * glow);
+      let cb = Math.min(255, skyB + sb * glow);
+      if (disc > 0) {
+        cr += (Math.min(255, sr * 1.05) - cr) * disc;
+        cg += (Math.min(255, sg * 1.05) - cg) * disc;
+        cb += (Math.min(255, sb * 1.05) - cb) * disc;
+      }
+      const i = (y * W + x) * 4;
+      d[i] = cr;
+      d[i + 1] = cg;
+      d[i + 2] = cb;
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/** Water-caustic web: voronoi border distance sharpened with pow — bright
+ * ridges where cells meet (fake of the refraction-convergence look).
+ * Param reinterpretation: cell = cell size, weight = line width/softness,
+ * jitter = feature-point spread, angle = domain rotation, stagger = adds a
+ * half-scale second layer (+30°), fg = caustic lines, bg = water. */
+function drawCaustics(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
+  if (W * H > MAX_EXPORT_PIXELS) return;
+  const [fr, fg, fb] = hexRGB(p.fg);
+  const [br, bg, bb] = hexRGB(p.bg);
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+
+  const spread = 0.35 + p.jitter * 0.55; // stays <= 0.8 (3x3 search bound)
+  const width = Math.max(0.08, p.weight * 0.8);
+  const k = 1.5 + (1 - p.weight) * 3.5;
+  const twoLayer = p.stagger;
+
+  const cx = W / 2;
+  const cy = H / 2;
+  const ang = (p.angle * Math.PI) / 180;
+  const cosA = Math.cos(-ang);
+  const sinA = Math.sin(-ang);
+  const warpCell = cell * 1.7;
+  const warpAmp = cell * 0.7;
+
+  // bright core + wide soft halo (edge in cell units, 0 on borders)
+  const ridge = (edge: number): number =>
+    Math.pow(clamp01(1 - edge / width), k) + 0.4 * Math.pow(clamp01(1 - edge / (width * 3)), 2);
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const dx0 = x - cx;
+      const dy0 = y - cy;
+      // low-frequency domain warp bends the straight voronoi borders into
+      // the wavering ridges real refraction makes (straight lines read as
+      // cracked ceramic, not water)
+      const wx = (valueNoise(x / warpCell, y / warpCell, 331) - 0.5) * warpAmp;
+      const wy = (valueNoise(x / warpCell, y / warpCell, 977) - 0.5) * warpAmp;
+      const rx = cx + (dx0 + wx) * cosA - (dy0 + wy) * sinA;
+      const ry = cy + (dx0 + wx) * sinA + (dy0 + wy) * cosA;
+      voronoiF12(rx, ry, cell, spread, 0);
+      let c = ridge(_f2 - _f1);
+      if (twoLayer) {
+        voronoiF12(rx + 31.7, ry - 17.3, cell * 0.55, spread, 7717);
+        c += 0.55 * ridge(_f2 - _f1);
+      }
+      c = clamp01(c);
+      const i = (y * W + x) * 4;
+      d[i] = br + (fr - br) * c;
+      d[i + 1] = bg + (fg - bg) * c;
+      d[i + 2] = bb + (fb - bb) * c;
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 export function drawPattern(
   ctx: CanvasRenderingContext2D,
   W: number,
@@ -388,6 +599,15 @@ export function drawPattern(
       break;
     case "fbm":
       drawFbm(ctx, W, H, p, cell);
+      break;
+    case "clouds":
+      drawClouds(ctx, W, H, p, cell);
+      break;
+    case "sky":
+      drawSky(ctx, W, H, p, cell);
+      break;
+    case "caustics":
+      drawCaustics(ctx, W, H, p, cell);
       break;
   }
 }

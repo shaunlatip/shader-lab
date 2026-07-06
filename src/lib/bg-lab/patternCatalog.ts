@@ -17,7 +17,7 @@ export const DEFAULT_PATTERN: PatternState = {
   bg: "#16140f",
 };
 
-const PATTERN_TYPE_LABEL: Record<PatternType, string> = {
+export const PATTERN_TYPE_LABEL: Record<PatternType, string> = {
   dotGrid: "Dot grid",
   lineGrid: "Line grid",
   checker: "Checker",
@@ -29,6 +29,9 @@ const PATTERN_TYPE_LABEL: Record<PatternType, string> = {
   truchet: "Truchet",
   voronoi: "Voronoi",
   fbm: "Noise (fbm)",
+  clouds: "Clouds",
+  sky: "Sky",
+  caustics: "Caustics",
 };
 
 export const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = PATTERN_TYPES.map((t) => ({

@@ -87,6 +87,9 @@ export const PATTERN_TYPES = [
   "truchet",
   "voronoi",
   "fbm",
+  "clouds",
+  "sky",
+  "caustics",
 ] as const;
 
 export type PatternType = (typeof PATTERN_TYPES)[number];
