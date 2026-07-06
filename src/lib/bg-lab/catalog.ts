@@ -239,6 +239,10 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         ],
         default: "square",
       },
+      // Progressive depixelation (Heckel C9): block halves per step and loops.
+      { kind: "switch", key: "animate", label: "Animate", default: false },
+      { kind: "slider", key: "speed", label: "Speed", min: 0.25, max: 4, step: 0.25, default: 1, showIf: { key: "animate", in: [true] } },
+      { kind: "slider", key: "steps", label: "Steps", min: 2, max: 7, step: 1, default: 5, showIf: { key: "animate", in: [true] } },
     ],
   },
   posterize: {
@@ -279,6 +283,10 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "pixelate", label: "Pixelate", min: 0, max: 16, step: 1, default: 0, unit: true },
       { kind: "switch", key: "mono", label: "Monochrome", default: false },
       { kind: "switch", key: "serpentine", label: "Serpentine (FS)", default: true },
+      // Animated blue-noise scroll (golden-ratio rank rotation). blueNoise only:
+      // Bayer/stripes have no meaningful temporal ordering, diffusion has no matrix.
+      { kind: "switch", key: "animate", label: "Animate", default: false, showIf: { key: "type", in: ["blueNoise"] } },
+      { kind: "slider", key: "speed", label: "Speed", min: 0.25, max: 4, step: 0.25, default: 1, showIf: { key: "type", in: ["blueNoise"] } },
     ],
   },
   halftone: {

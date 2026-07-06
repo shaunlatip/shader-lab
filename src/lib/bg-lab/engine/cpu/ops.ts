@@ -6,6 +6,7 @@ import type { EffectType, GradientStop, ParamValue } from "../../types";
 import {
   clamp,
   ctx2d,
+  ditherBnOffset,
   hexRGB,
   lerp,
   luma,
@@ -13,6 +14,7 @@ import {
   linToSrgb,
   orderedThreshold,
   pb,
+  pixelateBlock,
   pn,
   ps,
   pstops,
@@ -170,8 +172,8 @@ const blur: Op = (canvas, p, u) => {
 };
 
 // ---------------------------------------------------------------- pixelate
-const pixelate: Op = (canvas, p, u) => {
-  const block = Math.max(1, pn(p, "size", 8) * u);
+const pixelate: Op = (canvas, p, u, t) => {
+  const block = pixelateBlock(p, u, t);
   const shape = ps(p, "shape", "square");
   const W = canvas.width,
     H = canvas.height;
@@ -242,8 +244,9 @@ const posterize: Op = (canvas, p) => {
 };
 
 // ---------------------------------------------------------------- dither
-const dither: Op = (canvas, p, u) => {
+const dither: Op = (canvas, p, u, t) => {
   const type = ps(p, "type", "bayer4");
+  const bnOff = ditherBnOffset(p, t);
   const L = Math.max(2, Math.round(pn(p, "levels", 3)));
   const scale = Math.max(1, Math.round(pn(p, "scale", 2) * u));
   const mono = pb(p, "mono", false);
@@ -340,7 +343,7 @@ const dither: Op = (canvas, p, u) => {
       for (let x = 0; x < W; x++) {
         const pi = (y * W + x) * 4;
         const si = snapIdx(x, y); // snapped source index (pixSnap>0 = retro block)
-        const m = orderedThreshold(type, Math.floor(x / scale), Math.floor(y / scale)) - 0.5;
+        const m = orderedThreshold(type, Math.floor(x / scale), Math.floor(y / scale), bnOff) - 0.5;
         if (mono) {
           // quantize in linear light
           const vLin = 0.299 * srgbToLin(d[si]) + 0.587 * srgbToLin(d[si + 1]) + 0.114 * srgbToLin(d[si + 2]);

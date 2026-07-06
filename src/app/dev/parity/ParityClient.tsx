@@ -68,6 +68,20 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "dither", params: { type: "blueNoise" } }],
   },
   {
+    // Golden-ratio rank rotation — offset computed in TS on both sides, so
+    // this must stay in the same bit-exact tier as static blue noise.
+    label: "Dither · blue noise animated",
+    stack: [{ type: "dither", params: { type: "blueNoise", animate: true } }],
+    time: 1.7,
+  },
+  {
+    // Progressive depixelation — block size from the shared TS helper; time
+    // lands mid-step (not on a floor boundary). Same tier as static pixelate.
+    label: "Pixelate · animated",
+    stack: [{ type: "pixelate", params: { animate: true, speed: 1, steps: 5 } }],
+    time: 2.37,
+  },
+  {
     label: "Dither · Floyd-Steinberg",
     stack: [{ type: "dither", params: { type: "floydSteinberg" } }],
   },

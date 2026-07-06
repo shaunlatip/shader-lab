@@ -102,7 +102,7 @@ const CROSS_STRIPE8 = [
   56, 4,32,44,40,52,16,28,
 ];
 
-export function orderedThreshold(type: string, x: number, y: number): number {
+export function orderedThreshold(type: string, x: number, y: number, bnOffset = 0): number {
   if (type === "bayer2") return (B2[(y & 1) * 2 + (x & 1)] + 0.5) / 4;
   if (type === "bayer8") return (B8[(y & 7) * 8 + (x & 7)] + 0.5) / 64;
   if (type === "stripes") return (STRIPE8[(y & 7) * 8 + (x & 7)] + 0.5) / 64;
@@ -110,7 +110,34 @@ export function orderedThreshold(type: string, x: number, y: number): number {
   if (type === "blueNoise") {
     // Real 128^2 void-and-cluster matrix (F8) — replaced the IGN approximation.
     // Same bytes as the GL pass's u_bn texture (see bluenoise.ts): exact parity.
-    return (BLUE_NOISE_128[(y & 127) * 128 + (x & 127)] + 0.5) / 256;
+    // bnOffset (animated dither) rotates the byte RANK, wrapping in [0,256).
+    return (((BLUE_NOISE_128[(y & 127) * 128 + (x & 127)] + bnOffset) & 255) + 0.5) / 256;
   }
   return (B4[(y & 3) * 4 + (x & 3)] + 0.5) / 16; // bayer4 default
+}
+
+// --- shared CPU/GL temporal specs -----------------------------------------
+// Both engines call these SAME f64 helpers with the SAME `time`, so every
+// time-discrete decision (step level, rank offset) is decided once in TS and
+// never re-derived in f32 shader math — animated parity is exact by
+// construction. t === undefined (still export with no time) means "static".
+
+/** Pixelate block size — progressive depixelation steps the block down through
+ * power-of-2 levels and loops (Heckel C9, stateless in `time`). */
+export function pixelateBlock(p: Record<string, ParamValue>, u: number, t?: number): number {
+  const base = Math.max(1, pn(p, "size", 8) * u);
+  if (!pb(p, "animate", false) || t === undefined) return base;
+  const steps = Math.max(2, Math.round(pn(p, "steps", 5)));
+  const speed = pn(p, "speed", 1);
+  const level = Math.floor((((t * speed) % steps) + steps) % steps);
+  return Math.max(base / 2 ** level, 1);
+}
+
+/** Animated blue-noise dither: golden-ratio rank rotation, integers only
+ * (158 ≈ round(0.618·256)). Returns 0 for non-blueNoise types / animate off —
+ * i.e. exactly today's output. 24 steps/sec follows grain's temporal cadence. */
+export function ditherBnOffset(p: Record<string, ParamValue>, t?: number): number {
+  if (ps(p, "type", "bayer4") !== "blueNoise" || !pb(p, "animate", false) || t === undefined) return 0;
+  const frame = Math.floor(t * pn(p, "speed", 1) * 24);
+  return (((frame * 158) % 256) + 256) % 256;
 }
