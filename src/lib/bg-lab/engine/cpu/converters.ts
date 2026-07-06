@@ -507,6 +507,10 @@ export const lineArt: Op = (canvas, p, u) => {
 const KW_R_CAP = 12;
 
 export const kuwahara: Op = (canvas, p, u) => {
+  if (ps(p, "quality", "fast") === "anisotropic") {
+    kuwaharaAniso(canvas, p, u);
+    return;
+  }
   const R = Math.min(KW_R_CAP, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
   const smooth = ps(p, "quality", "fast") === "smooth";
 
@@ -645,6 +649,208 @@ export const kuwahara: Op = (canvas, p, u) => {
   out.data.set(d);
   ctx.putImageData(out, 0, 0);
 };
+
+// ------------------------------------------- kuwahara · anisotropic (Kyprianidis)
+// CPU mirror of the GL 5-step pipeline in gl/shaders.ts (see the spec comment
+// there — ONE spec, both engines): structure tensor from Sobel on luma601/255,
+// 9×9 σ=2 gaussian tensor smooth, then the oriented Papari filter with smooth
+// polynomial sector weights. No 16-bit pack emulation here — the pack error
+// (1/65025) is negligible against the f32-vs-f64 trig divergence that sets
+// this mode's statistical parity tier. Radius caps at 8 (ellipse reach 2R=16).
+const KW_ANISO_R_CAP = 8;
+const KW_SECT: number[] = [];
+for (let k = 0; k < 8; k++) {
+  KW_SECT.push(Math.cos((k * Math.PI) / 4), Math.sin((k * Math.PI) / 4));
+}
+
+function kuwaharaAniso(canvas: HTMLCanvasElement, p: Record<string, ParamValue>, u: number): void {
+  const R = Math.min(KW_ANISO_R_CAP, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
+  // slider is "stroke elongation" (higher = longer strokes); Kyprianidis α is
+  // its inverse. Same mapping as the GL runKuwaharaAniso.
+  const alpha = 1 / Math.min(2, Math.max(0.25, pn(p, "anisotropy", 1)));
+  const q = Math.min(16, Math.max(2, pn(p, "sharpness", 8))) * 0.5;
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const snap = tmpCanvas(canvas, W, H);
+  ctx2d(snap).drawImage(canvas, 0, 0);
+  const src = ctx2d(snap).getImageData(0, 0, W, H).data;
+  const ctx = ctx2d(canvas);
+  const d = new Uint8ClampedArray(W * H * 4);
+
+  // luma in [0,1] (bytes → /255, matching the GL texelLuma)
+  const lum = new Float32Array(W * H);
+  for (let i = 0, px = 0; px < W * H; px++, i += 4) {
+    lum[px] = luma601(src[i], src[i + 1], src[i + 2]) / 255;
+  }
+  const lumAt = (x: number, y: number) => lum[clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)];
+
+  // structure tensor (E=gx²/16, G=gy²/16, F=gx·gy/16 — same normalization as GL)
+  const tE = new Float32Array(W * H);
+  const tG = new Float32Array(W * H);
+  const tF = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const tl = lumAt(x - 1, y - 1);
+      const tc = lumAt(x, y - 1);
+      const tr = lumAt(x + 1, y - 1);
+      const ml = lumAt(x - 1, y);
+      const mr = lumAt(x + 1, y);
+      const bl = lumAt(x - 1, y + 1);
+      const bc = lumAt(x, y + 1);
+      const br = lumAt(x + 1, y + 1);
+      const gx = tr + 2 * mr + br - (tl + 2 * ml + bl);
+      const gy = bl + 2 * bc + br - (tl + 2 * tc + tr);
+      const i = y * W + x;
+      tE[i] = (gx * gx) / 16;
+      tG[i] = (gy * gy) / 16;
+      tF[i] = (gx * gy) / 16;
+    }
+  }
+
+  // 9×9 gaussian tensor smooth (σ=2), idx-clamped — same kernel as the GL pass
+  const KW_SMOOTH_R = 4;
+  const gw: number[] = [];
+  let gwSum = 0;
+  for (let j = -KW_SMOOTH_R; j <= KW_SMOOTH_R; j++)
+    for (let i = -KW_SMOOTH_R; i <= KW_SMOOTH_R; i++) {
+      const w = Math.exp(-(i * i + j * j) / 8);
+      gw.push(w);
+      gwSum += w;
+    }
+  const sE = new Float32Array(W * H);
+  const sG = new Float32Array(W * H);
+  const sF = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let aE = 0;
+      let aG = 0;
+      let aF = 0;
+      let gi = 0;
+      for (let j = -KW_SMOOTH_R; j <= KW_SMOOTH_R; j++) {
+        const py = clamp(y + j, 0, H - 1);
+        for (let i = -KW_SMOOTH_R; i <= KW_SMOOTH_R; i++, gi++) {
+          const px = clamp(x + i, 0, W - 1);
+          const w = gw[gi];
+          const ti = py * W + px;
+          aE += tE[ti] * w;
+          aG += tG[ti] * w;
+          aF += tF[ti] * w;
+        }
+      }
+      const i2 = y * W + x;
+      sE[i2] = aE / gwSum;
+      sG[i2] = aG / gwSum;
+      sF[i2] = aF / gwSum;
+    }
+  }
+
+  // oriented filter — mirrors KW_ANISO_MAIN step for step
+  const m = new Float64Array(8 * 3);
+  const s = new Float64Array(8 * 3);
+  const n = new Float64Array(8);
+  const wl0 = 0.299;
+  const wl1 = 0.587;
+  const wl2 = 0.114;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const ti = y * W + x;
+      const E = sE[ti];
+      const G = sG[ti];
+      const F = sF[ti];
+      const diff = E - G;
+      const rad = Math.sqrt(diff * diff + 4 * F * F);
+      const lam1 = (E + G + rad) * 0.5;
+      const lam2 = (E + G - rad) * 0.5;
+      const A = (lam1 - lam2) / (lam1 + lam2 + 1e-7);
+      const phi = 0.5 * Math.atan2(2 * F, diff) + Math.PI / 2;
+      const a = R * Math.min(2, Math.max(1, (alpha + A) / alpha));
+      const b = R * Math.min(1, Math.max(0.5, alpha / (alpha + A)));
+      const ca = Math.cos(phi);
+      const sa = Math.sin(phi);
+      m.fill(0);
+      s.fill(0);
+      n.fill(0);
+
+      const ci = ti * 4;
+      const c00r = src[ci];
+      const c00g = src[ci + 1];
+      const c00b = src[ci + 2];
+      const ext = Math.ceil(a);
+      for (let dy = -ext; dy <= ext; dy++) {
+        for (let dx = -ext; dx <= ext; dx++) {
+          const ux = (ca * dx + sa * dy) / a;
+          const uy = (-sa * dx + ca * dy) / b;
+          const vv = ux * ux + uy * uy;
+          if (vv > 1) continue;
+          const px = clamp(x + dx, 0, W - 1);
+          const py = clamp(y + dy, 0, H - 1);
+          const si = (py * W + px) * 4;
+          const cr = src[si] - c00r;
+          const cg = src[si + 1] - c00g;
+          const cb = src[si + 2] - c00b;
+          const ew = Math.exp(-3.125 * vv);
+          const vl = Math.sqrt(vv);
+          const inv = vl > 1e-6 ? 1 / vl : 0;
+          const vnx = ux * inv;
+          const vny = uy * inv;
+          for (let k = 0; k < 8; k++) {
+            let ck: number;
+            if (vl > 1e-6) {
+              ck = Math.max(0, vnx * KW_SECT[k * 2] + vny * KW_SECT[k * 2 + 1]);
+              ck = ck * ck;
+              ck = ck * ck;
+              ck = ck * ck; // cos^8
+            } else {
+              ck = 0.125; // centre pixel: split evenly across sectors
+            }
+            const w = ck * ew;
+            const mk = k * 3;
+            m[mk] += cr * w;
+            m[mk + 1] += cg * w;
+            m[mk + 2] += cb * w;
+            s[mk] += cr * cr * w;
+            s[mk + 1] += cg * cg * w;
+            s[mk + 2] += cb * cb * w;
+            n[k] += w;
+          }
+        }
+      }
+
+      let accR = 0;
+      let accG = 0;
+      let accB = 0;
+      let accW = 0;
+      for (let k = 0; k < 8; k++) {
+        if (n[k] < 1e-6) continue;
+        const invN = 1 / n[k];
+        const mk = k * 3;
+        const mr = m[mk] * invN;
+        const mg = m[mk + 1] * invN;
+        const mb = m[mk + 2] * invN;
+        const vr = s[mk] * invN - mr * mr;
+        const vg = s[mk + 1] * invN - mg * mg;
+        const vb = s[mk + 2] * invN - mb * mb;
+        const sig = Math.sqrt(Math.max(0, wl0 * vr + wl1 * vg + wl2 * vb));
+        const ak = 1 / (1 + Math.pow(sig, q));
+        accR += mr * ak;
+        accG += mg * ak;
+        accB += mb * ak;
+        accW += ak;
+      }
+      const pi = ti * 4;
+      const invW = accW > 0 ? 1 / accW : 0;
+      d[pi] = clamp(Math.round(accR * invW + c00r), 0, 255);
+      d[pi + 1] = clamp(Math.round(accG * invW + c00g), 0, 255);
+      d[pi + 2] = clamp(Math.round(accB * invW + c00b), 0, 255);
+      d[pi + 3] = 255;
+    }
+  }
+
+  const out = ctx.createImageData(W, H);
+  out.data.set(d);
+  ctx.putImageData(out, 0, 0);
+}
 
 // ---------------------------------------------------------------- lego
 // Posterised studded tiles: a flat brick fill per cell + a raised dot with a

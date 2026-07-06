@@ -86,12 +86,25 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "dither", params: { type: "floydSteinberg" } }],
   },
   {
+    // quality must be explicit — the catalog default is "smooth", so params:{}
+    // silently tested the smooth path twice (pre-existing label bug).
     label: "Kuwahara · fast",
-    stack: [{ type: "kuwahara", params: {} }],
+    stack: [{ type: "kuwahara", params: { quality: "fast" } }],
   },
   {
     label: "Kuwahara · smooth",
     stack: [{ type: "kuwahara", params: { quality: "smooth" } }],
+  },
+  {
+    // Statistical tier (NOT bit-exact like fast/smooth): tensor smoothing +
+    // f32/f64 trig divergence can pick different stroke orientations at
+    // near-isotropic pixels. Targets: meanDelta <= 1.5, pctDiffPixels <= 5%.
+    label: "Kuwahara · anisotropic",
+    stack: [{ type: "kuwahara", params: { quality: "anisotropic" } }],
+  },
+  {
+    label: "Kuwahara · anisotropic strong",
+    stack: [{ type: "kuwahara", params: { quality: "anisotropic", radius: 8, anisotropy: 2, sharpness: 12 } }],
   },
   {
     label: "Gradient map",

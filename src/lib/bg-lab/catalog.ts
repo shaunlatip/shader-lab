@@ -747,12 +747,17 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         options: [
           { value: "fast", label: "fast" },
           { value: "smooth", label: "smooth" },
+          { value: "anisotropic", label: "anisotropic" },
         ],
         // smooth is the better look and costs the same on the GL pass
-        // (0.083 ms/frame); the CPU engine only pays it on still export
+        // (0.083 ms/frame); the CPU engine only pays it on still export.
+        // anisotropic (Kyprianidis) aligns strokes to image flow — the
+        // "painted" look; radius caps at 8 in that mode (ellipse reach 2R).
         default: "smooth",
       },
       { kind: "slider", key: "radius", label: "Radius", min: 2, max: 12, step: 1, default: 4, unit: true },
+      { kind: "slider", key: "anisotropy", label: "Stroke elongation", min: 0.25, max: 2, step: 0.05, default: 1, showIf: { key: "quality", in: ["anisotropic"] } },
+      { kind: "slider", key: "sharpness", label: "Sector sharpness", min: 2, max: 16, step: 1, default: 8, showIf: { key: "quality", in: ["anisotropic"] } },
     ],
   },
 

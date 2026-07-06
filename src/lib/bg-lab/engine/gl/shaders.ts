@@ -920,8 +920,7 @@ void main(){
 // fragment shaders (core WebGL2, no extension).
 // Both modes share the single box loop and the texture read per sample;
 // only the accumulation differs, branched on u_smooth.
-const kuwahara: GpuPass = {
-  frag: f(`const int R_MAX = 12;
+const KUWAHARA_FRAG = f(`const int R_MAX = 12;
 uniform int u_radius;   // 2..12 runtime
 uniform int u_smooth;   // 0 fast, 1 smooth
 // Octant of integer offset (x,y) == the CPU's min(7, floor(atan2(y,x)/45deg))
@@ -1014,12 +1013,210 @@ void main(){
     }
   }
   o = vec4(clamp((best + c00)/255.0, 0.0, 1.0), 1.0);
-}`),
-  setUniforms: (gl, prog, p, u) => {
-    const radius = Math.min(12, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
-    const smooth = ps(p, "quality", "fast") === "smooth" ? 1 : 0;
-    gl.uniform1i(loc(gl, prog, "u_radius"), radius);
-    gl.uniform1i(loc(gl, prog, "u_smooth"), smooth);
+}`);
+
+// ------------------------------------------- kuwahara · anisotropic (Kyprianidis)
+// Mirrors cpu/converters.ts `kuwaharaAniso` — ONE spec, both engines:
+//   1. structure tensor from Sobel on luma601 of 8-bit-snapped texels
+//      (E=gx²/16, G=gy²/16, F=gx·gy/16 — the /16 normalization cancels in the
+//      eigen math and keeps values packable in [0,1])
+//   2. 9×9 gaussian tensor smooth (σ=2), idx-clamped
+//   3. oriented Papari filter: ellipse major axis along the local tangent
+//      (φ = 0.5·atan2(2F, E−G) + π/2 — CONTINUOUS use only, feeds a rotation,
+//      never a discrete pick, so f32 atan error stays sub-visible), axes
+//      a = R·clamp((α+A)/α, 1, 2), b = R·clamp(α/(α+A), 0.5, 1); smooth
+//      polynomial sector weights cos^8(θv−kπ/4)·exp(−3.125|v|²) computed via
+//      dot products with the 8 sector unit dirs — NO discrete sector
+//      assignment, so the integer-sectorOf fix above isn't needed here
+//   4. sector blend α_k = 1/(1 + σ_k^q), σ in byte scale, q = sharpness/2
+// Tensor temps are 16-bit packed (pack16/unpack16, XDoG precedent): F is
+// signed and the eigen decomposition subtracts near-equal quantities — raw
+// 8-bit tensor storage gives visible stroke-direction banding in flat regions.
+// F is duplicated into rg AND ba so ONE smooth frag serves both tensor temps.
+// Aniso radius caps at 8 (ellipse extends to 2R = 16 = R_MAX_A loop bound).
+// Parity tier: statistical (tensor smoothing + trig divergence), targets in
+// ParityClient — NOT bit-exact like fast/smooth.
+const KW_ANISO_TENSOR_EG = f(`
+float texelLuma(vec2 idx){
+  vec2 c = clamp(idx, vec2(0.0), u_dims-1.0);
+  vec3 rgb = floor(texture(u_tex, vec2((c.x+0.5)/u_dims.x, 1.0-(c.y+0.5)/u_dims.y)).rgb*255.0+0.5);
+  return luma601(rgb)/255.0;
+}
+vec2 pack16(float v){ float e = clamp(v,0.0,1.0)*255.0; float hi = floor(e); return vec2(hi/255.0, e-hi); }
+void main(){
+  vec2 px = floor(vec2(v_uv.x*u_dims.x,(1.0-v_uv.y)*u_dims.y));
+  float tl=texelLuma(px+vec2(-1.0,-1.0)), tc=texelLuma(px+vec2(0.0,-1.0)), tr=texelLuma(px+vec2(1.0,-1.0));
+  float ml=texelLuma(px+vec2(-1.0,0.0)),                                   mr=texelLuma(px+vec2(1.0,0.0));
+  float bl=texelLuma(px+vec2(-1.0,1.0)), bc=texelLuma(px+vec2(0.0,1.0)), br=texelLuma(px+vec2(1.0,1.0));
+  float gx = (tr+2.0*mr+br) - (tl+2.0*ml+bl);
+  float gy = (bl+2.0*bc+br) - (tl+2.0*tc+tr);
+  o = vec4(pack16(gx*gx/16.0), pack16(gy*gy/16.0));
+}`);
+
+const KW_ANISO_TENSOR_F = f(`
+float texelLuma(vec2 idx){
+  vec2 c = clamp(idx, vec2(0.0), u_dims-1.0);
+  vec3 rgb = floor(texture(u_tex, vec2((c.x+0.5)/u_dims.x, 1.0-(c.y+0.5)/u_dims.y)).rgb*255.0+0.5);
+  return luma601(rgb)/255.0;
+}
+vec2 pack16(float v){ float e = clamp(v,0.0,1.0)*255.0; float hi = floor(e); return vec2(hi/255.0, e-hi); }
+void main(){
+  vec2 px = floor(vec2(v_uv.x*u_dims.x,(1.0-v_uv.y)*u_dims.y));
+  float tl=texelLuma(px+vec2(-1.0,-1.0)), tc=texelLuma(px+vec2(0.0,-1.0)), tr=texelLuma(px+vec2(1.0,-1.0));
+  float ml=texelLuma(px+vec2(-1.0,0.0)),                                   mr=texelLuma(px+vec2(1.0,0.0));
+  float bl=texelLuma(px+vec2(-1.0,1.0)), bc=texelLuma(px+vec2(0.0,1.0)), br=texelLuma(px+vec2(1.0,1.0));
+  float gx = (tr+2.0*mr+br) - (tl+2.0*ml+bl);
+  float gy = (bl+2.0*bc+br) - (tl+2.0*tc+tr);
+  vec2 fp = pack16((gx*gy+16.0)/32.0); // signed → [0,1]; duplicated so the smooth frag is shared
+  o = vec4(fp, fp);
+}`);
+
+const KW_ANISO_SMOOTH = f(`
+float unpack16(vec2 hl){ return hl.x + hl.y/255.0; }
+vec2 pack16(float v){ float e = clamp(v,0.0,1.0)*255.0; float hi = floor(e); return vec2(hi/255.0, e-hi); }
+vec4 texelRGBA(vec2 idx){
+  vec2 c = clamp(idx, vec2(0.0), u_dims-1.0);
+  return texture(u_tex, vec2((c.x+0.5)/u_dims.x, 1.0-(c.y+0.5)/u_dims.y));
+}
+void main(){
+  vec2 px = floor(vec2(v_uv.x*u_dims.x,(1.0-v_uv.y)*u_dims.y));
+  float a0=0.0; float a1=0.0; float wsum=0.0;
+  for(int j=-4;j<=4;j++){
+    for(int i=-4;i<=4;i++){
+      float w = exp(-float(i*i+j*j)/8.0); // σ=2
+      vec4 t = texelRGBA(px+vec2(float(i),float(j)));
+      a0 += unpack16(t.rg)*w;
+      a1 += unpack16(t.ba)*w;
+      wsum += w;
+    }
+  }
+  o = vec4(pack16(a0/wsum), pack16(a1/wsum));
+}`);
+
+const KW_ANISO_MAIN = f(`const int R_MAX_A = 16;
+uniform int u_radius;
+uniform float u_alpha;
+uniform float u_q;
+uniform sampler2D u_teg;
+uniform sampler2D u_tf;
+const vec2 SECT[8] = vec2[8](
+  vec2(1.0,0.0), vec2(0.7071067811865476,0.7071067811865476),
+  vec2(0.0,1.0), vec2(-0.7071067811865476,0.7071067811865476),
+  vec2(-1.0,0.0), vec2(-0.7071067811865476,-0.7071067811865476),
+  vec2(0.0,-1.0), vec2(0.7071067811865476,-0.7071067811865476));
+float unpack16(vec2 hl){ return hl.x + hl.y/255.0; }
+vec4 texelOf(sampler2D s, vec2 idx){
+  vec2 c = clamp(idx, vec2(0.0), u_dims-1.0);
+  return texture(s, vec2((c.x+0.5)/u_dims.x, 1.0-(c.y+0.5)/u_dims.y));
+}
+void main(){
+  vec2 px = floor(vec2(v_uv.x*u_dims.x,(1.0-v_uv.y)*u_dims.y));
+  vec3 c00 = floor(texelOf(u_tex, px).rgb*255.0+0.5);
+  vec4 teg = texelOf(u_teg, px);
+  float E = unpack16(teg.rg);
+  float G = unpack16(teg.ba);
+  float F = unpack16(texelOf(u_tf, px).rg)*2.0 - 1.0;
+  float diff = E - G;
+  float rad = sqrt(diff*diff + 4.0*F*F);
+  float lam1 = (E+G+rad)*0.5;
+  float lam2 = (E+G-rad)*0.5;
+  float A = (lam1-lam2)/(lam1+lam2+1e-7);
+  float phi = 0.5*atan(2.0*F, diff) + 1.5707963267948966; // major axis = local tangent
+  float R = float(u_radius);
+  float a = R*clamp((u_alpha+A)/u_alpha, 1.0, 2.0);
+  float b = R*clamp(u_alpha/(u_alpha+A), 0.5, 1.0);
+  float ca = cos(phi);
+  float sa = sin(phi);
+  vec3 m[8]; vec3 s[8]; float n[8];
+  for(int k=0;k<8;k++){ m[k]=vec3(0.0); s[k]=vec3(0.0); n[k]=0.0; }
+  int ext = int(ceil(a));
+  for(int dy=-R_MAX_A; dy<=R_MAX_A; dy++){
+    for(int dx=-R_MAX_A; dx<=R_MAX_A; dx++){
+      if(abs(dx)>ext || abs(dy)>ext) continue;
+      float fx=float(dx); float fy=float(dy);
+      float ux = ( ca*fx + sa*fy)/a;
+      float uy = (-sa*fx + ca*fy)/b;
+      float vv = ux*ux + uy*uy;
+      if(vv > 1.0) continue;
+      vec3 c = floor(texelOf(u_tex, px+vec2(fx,fy)).rgb*255.0+0.5) - c00;
+      float ew = exp(-3.125*vv);
+      float vl = sqrt(vv);
+      vec2 vn = vl>1e-6 ? vec2(ux,uy)/vl : vec2(0.0);
+      for(int k=0;k<8;k++){
+        float ck;
+        if(vl>1e-6){
+          ck = max(0.0, dot(vn, SECT[k]));
+          ck = ck*ck; ck = ck*ck; ck = ck*ck; // cos^8
+        } else {
+          ck = 0.125; // centre pixel: split evenly across sectors
+        }
+        float w = ck*ew;
+        m[k] += c*w;
+        s[k] += c*c*w;
+        n[k] += w;
+      }
+    }
+  }
+  vec3 accM = vec3(0.0);
+  float accW = 0.0;
+  vec3 wl = vec3(0.299,0.587,0.114);
+  for(int k=0;k<8;k++){
+    if(n[k]<1e-6) continue;
+    vec3 mk = m[k]/n[k];
+    vec3 vk = s[k]/n[k] - mk*mk;
+    float sig = sqrt(max(0.0, dot(vk, wl))); // byte scale
+    float ak = 1.0/(1.0 + pow(sig, u_q));
+    accM += mk*ak;
+    accW += ak;
+  }
+  vec3 best = accW>0.0 ? accM/accW : vec3(0.0);
+  o = vec4(clamp((best + c00)/255.0, 0.0, 1.0), 1.0);
+}`);
+
+function runKuwaharaAniso(ctx: MultiPassCtx, p: Record<string, ParamValue>, u: number) {
+  const R = Math.min(8, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
+  // slider is "stroke elongation" (higher = longer strokes); Kyprianidis α is
+  // its inverse. Same mapping in the CPU mirror.
+  const alpha = 1 / Math.min(2, Math.max(0.25, pn(p, "anisotropy", 1)));
+  const q = Math.min(16, Math.max(2, pn(p, "sharpness", 8))) * 0.5;
+  const teg = ctx.temp("kwTensorEG");
+  const tf = ctx.temp("kwTensorF");
+  const tegS = ctx.temp("kwTensorEGs");
+  const tfS = ctx.temp("kwTensorFs");
+  ctx.run(KW_ANISO_TENSOR_EG, teg, [{ name: "u_tex", tex: ctx.input.tex }]);
+  ctx.run(KW_ANISO_TENSOR_F, tf, [{ name: "u_tex", tex: ctx.input.tex }]);
+  ctx.run(KW_ANISO_SMOOTH, tegS, [{ name: "u_tex", tex: teg.tex }]);
+  ctx.run(KW_ANISO_SMOOTH, tfS, [{ name: "u_tex", tex: tf.tex }]);
+  ctx.run(
+    KW_ANISO_MAIN,
+    ctx.output,
+    [
+      { name: "u_tex", tex: ctx.input.tex },
+      { name: "u_teg", tex: tegS.tex },
+      { name: "u_tf", tex: tfS.tex },
+    ],
+    (gl, prog) => {
+      gl.uniform1i(loc(gl, prog, "u_radius"), R);
+      gl.uniform1f(loc(gl, prog, "u_alpha"), alpha);
+      gl.uniform1f(loc(gl, prog, "u_q"), q);
+    },
+  );
+}
+
+const kuwahara: GpuPass = {
+  frags: [KUWAHARA_FRAG, KW_ANISO_TENSOR_EG, KW_ANISO_TENSOR_F, KW_ANISO_SMOOTH, KW_ANISO_MAIN],
+  multi: (ctx, p, u) => {
+    if (ps(p, "quality", "fast") === "anisotropic") {
+      runKuwaharaAniso(ctx, p, u);
+      return;
+    }
+    // classic fast/smooth: the original single-pass frag verbatim — one step,
+    // same uniforms — so old configs stay byte-identical through the multi path.
+    ctx.run(KUWAHARA_FRAG, ctx.output, [{ name: "u_tex", tex: ctx.input.tex }], (gl, prog) => {
+      const radius = Math.min(12, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
+      gl.uniform1i(loc(gl, prog, "u_radius"), radius);
+      gl.uniform1i(loc(gl, prog, "u_smooth"), ps(p, "quality", "fast") === "smooth" ? 1 : 0);
+    });
   },
 };
 
