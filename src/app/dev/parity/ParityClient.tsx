@@ -167,6 +167,13 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "bloom", params: {} }],
   },
   {
+    // ACCEPTED DIVERGENCE (stats only, grain precedent): GL runs the dual-
+    // filter mip chain, CPU maps dual → gaussian at radius*1.4. Numbers are
+    // recorded for drift awareness, no hard target.
+    label: "Bloom · dual (stats only)",
+    stack: [{ type: "bloom", params: { quality: "dual" } }],
+  },
+  {
     // Statistical tier: the only cross-engine divergence is rare f32/f64
     // floor ties on ray sample positions (one bright texel on one of N
     // samples). Targets: meanDelta < 0.5, pctDiffPixels < 1.5%.

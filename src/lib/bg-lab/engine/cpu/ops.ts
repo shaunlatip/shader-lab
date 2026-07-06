@@ -647,7 +647,13 @@ const bloom: Op = (canvas, p, u) => {
   const intensity = pn(p, "intensity", 0.5);
   if (intensity <= 0) return;
   const thr = pn(p, "threshold", 0.7) * 255;
-  const radius = Math.max(0.5, pn(p, "radius", 12) * u);
+  // quality:"dual" is a GL-only look (mip-chain dual filter) — DIVERGENCE
+  // ACCEPTED by decision (blur-family Skia precedent): the CPU renders its
+  // gaussian pipeline at an equivalent visual radius instead of hand-emulating
+  // bilinear 13/9-tap kernels across three mip levels. GL is the preview look
+  // authority for dual; still export gets this gaussian look.
+  const dual = ps(p, "quality", "gaussian") === "dual";
+  const radius = Math.max(0.5, pn(p, "radius", 12) * u) * (dual ? 1.4 : 1);
   const W = canvas.width,
     H = canvas.height;
   // extract bright areas

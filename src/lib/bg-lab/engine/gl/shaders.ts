@@ -26,7 +26,10 @@ export type AssetTexKey = "blueNoise128";
 export interface MultiPassCtx {
   input: { tex: WebGLTexture };
   output: { tex: WebGLTexture };
-  temp: (name: string) => { tex: WebGLTexture };
+  /** Pooled temp render target. Defaults to the op's full W×H; pass w/h for
+   * sized temps (F5b mip chains — dual bloom). Common uniforms (u_dims,
+   * u_texel) always describe the DESTINATION being rendered into. */
+  temp: (name: string, w?: number, h?: number) => { tex: WebGLTexture };
   run: (
     frag: string,
     dst: { tex: WebGLTexture },
@@ -1815,7 +1818,124 @@ void main(){
   o = vec4(mix(base.rgb, screened, effA), base.a);
 }`);
 
-const BLOOM_FRAGS = [COPY_FRAG, BLOOM_BRIGHT_FRAG, BLOOM_GAUSS_FRAG, BLOOM_COMPOSITE_FRAG];
+// ------------------------------------------- bloom · dual-filter (F5b, GL-only look)
+// Jimenez/Kawase dual-filter chain: 13-tap downsample ×3 (W/2, W/4, W/8) then
+// 9-tap tent upsample back, averaging in the same-size skip at each level
+// (0.5·(up+skip) — the canonical additive form assumes HDR float targets; in
+// this RGBA8 pipeline straight adds clamp to white, averaging keeps the
+// hierarchy bounded). Hardware LINEAR at half-texel offsets is fine HERE
+// because this whole mode is DIVERGENCE-ACCEPTED (user decision, Skia-blur
+// precedent): the CPU op maps quality:"dual" to its gaussian pipeline at an
+// equivalent visual radius — GL is the look authority for this mode, still
+// export renders the gaussian look. Parity entry is stats-only.
+// u_srcTexel = 1/srcDims (the texture being READ — u_texel describes the dst).
+const BLOOM_DOWN13_FRAG = f(`uniform vec2 u_srcTexel;
+void main(){
+  vec2 t = u_srcTexel;
+  vec4 A = texture(u_tex, v_uv + t*vec2(-2.0,-2.0));
+  vec4 B = texture(u_tex, v_uv + t*vec2( 0.0,-2.0));
+  vec4 C = texture(u_tex, v_uv + t*vec2( 2.0,-2.0));
+  vec4 D = texture(u_tex, v_uv + t*vec2(-2.0, 0.0));
+  vec4 E = texture(u_tex, v_uv);
+  vec4 F = texture(u_tex, v_uv + t*vec2( 2.0, 0.0));
+  vec4 G = texture(u_tex, v_uv + t*vec2(-2.0, 2.0));
+  vec4 H = texture(u_tex, v_uv + t*vec2( 0.0, 2.0));
+  vec4 I = texture(u_tex, v_uv + t*vec2( 2.0, 2.0));
+  vec4 J = texture(u_tex, v_uv + t*vec2(-1.0,-1.0));
+  vec4 K = texture(u_tex, v_uv + t*vec2( 1.0,-1.0));
+  vec4 L = texture(u_tex, v_uv + t*vec2(-1.0, 1.0));
+  vec4 M = texture(u_tex, v_uv + t*vec2( 1.0, 1.0));
+  o = E*0.125 + (A+C+G+I)*0.03125 + (B+D+F+H)*0.0625 + (J+K+L+M)*0.125;
+}`);
+
+const BLOOM_UPTENT_FRAG = f(`uniform vec2 u_srcTexel;
+uniform float u_off;
+uniform sampler2D u_skip;
+uniform float u_hasSkip;
+void main(){
+  vec2 t = u_srcTexel * u_off;
+  vec4 up = ( texture(u_tex, v_uv + vec2(-t.x,-t.y)) + 2.0*texture(u_tex, v_uv + vec2(0.0,-t.y)) + texture(u_tex, v_uv + vec2(t.x,-t.y))
+        + 2.0*texture(u_tex, v_uv + vec2(-t.x, 0.0)) + 4.0*texture(u_tex, v_uv)               + 2.0*texture(u_tex, v_uv + vec2(t.x, 0.0))
+        +     texture(u_tex, v_uv + vec2(-t.x, t.y)) + 2.0*texture(u_tex, v_uv + vec2(0.0, t.y)) + texture(u_tex, v_uv + vec2(t.x, t.y)) ) / 16.0;
+  o = u_hasSkip>0.5 ? (up + texture(u_skip, v_uv))*0.5 : up;
+}`);
+
+function runBloomDual(
+  ctx: MultiPassCtx,
+  intensity: number,
+  thr255: number,
+  radius: number,
+  dims: { w: number; h: number },
+) {
+  if (intensity <= 0) {
+    ctx.run(COPY_FRAG, ctx.output, [{ name: "u_tex", tex: ctx.input.tex }]);
+    return;
+  }
+  const W = dims.w;
+  const H = dims.h;
+  const w2 = Math.max(1, Math.round(W / 2));
+  const h2 = Math.max(1, Math.round(H / 2));
+  const w4 = Math.max(1, Math.round(W / 4));
+  const h4 = Math.max(1, Math.round(H / 4));
+  const w8 = Math.max(1, Math.round(W / 8));
+  const h8 = Math.max(1, Math.round(H / 8));
+  // tent spread: radius 12 (default) ≈ 1 texel at each level's own scale
+  const off = Math.min(3, Math.max(0.5, radius / 12));
+
+  const bright = ctx.temp("bright");
+  ctx.run(BLOOM_BRIGHT_FRAG, bright, [{ name: "u_tex", tex: ctx.input.tex }], (gl, prog) => {
+    gl.uniform1f(loc(gl, prog, "u_thr255"), thr255);
+  });
+  const srcTexel = (w: number, h: number) => (gl: WebGL2RenderingContext, prog: WebGLProgram) => {
+    gl.uniform2f(loc(gl, prog, "u_srcTexel"), 1 / w, 1 / h);
+  };
+  const d1 = ctx.temp("dualD1", w2, h2);
+  const d2 = ctx.temp("dualD2", w4, h4);
+  const d3 = ctx.temp("dualD3", w8, h8);
+  ctx.run(BLOOM_DOWN13_FRAG, d1, [{ name: "u_tex", tex: bright.tex }], srcTexel(W, H));
+  ctx.run(BLOOM_DOWN13_FRAG, d2, [{ name: "u_tex", tex: d1.tex }], srcTexel(w2, h2));
+  ctx.run(BLOOM_DOWN13_FRAG, d3, [{ name: "u_tex", tex: d2.tex }], srcTexel(w4, h4));
+  const upStep = (
+    dst: { tex: WebGLTexture },
+    src: { tex: WebGLTexture },
+    skip: { tex: WebGLTexture } | null,
+    sw: number,
+    sh: number,
+  ) => {
+    ctx.run(
+      BLOOM_UPTENT_FRAG,
+      dst,
+      [
+        { name: "u_tex", tex: src.tex },
+        { name: "u_skip", tex: (skip ?? src).tex },
+      ],
+      (gl, prog) => {
+        gl.uniform2f(loc(gl, prog, "u_srcTexel"), 1 / sw, 1 / sh);
+        gl.uniform1f(loc(gl, prog, "u_off"), off);
+        gl.uniform1f(loc(gl, prog, "u_hasSkip"), skip ? 1 : 0);
+      },
+    );
+  };
+  const u2 = ctx.temp("dualU2", w4, h4);
+  const u1 = ctx.temp("dualU1", w2, h2);
+  const full = ctx.temp("dualFull");
+  upStep(u2, d3, d2, w8, h8);
+  upStep(u1, u2, d1, w4, h4);
+  upStep(full, u1, null, w2, h2);
+  ctx.run(
+    BLOOM_COMPOSITE_FRAG,
+    ctx.output,
+    [
+      { name: "u_tex", tex: ctx.input.tex },
+      { name: "u_blurred", tex: full.tex },
+    ],
+    (gl, prog) => {
+      gl.uniform1f(loc(gl, prog, "u_intensity"), intensity);
+    },
+  );
+}
+
+const BLOOM_FRAGS = [COPY_FRAG, BLOOM_BRIGHT_FRAG, BLOOM_GAUSS_FRAG, BLOOM_COMPOSITE_FRAG, BLOOM_DOWN13_FRAG, BLOOM_UPTENT_FRAG];
 
 function runBloomChain(ctx: MultiPassCtx, intensity: number, thr255: number, radius: number) {
   if (intensity <= 0) {
@@ -1852,10 +1972,14 @@ function runBloomChain(ctx: MultiPassCtx, intensity: number, thr255: number, rad
 
 const bloom: GpuPass = {
   frags: BLOOM_FRAGS,
-  multi: (ctx, p, u) => {
+  multi: (ctx, p, u, _t, dims) => {
     const intensity = pn(p, "intensity", 0.5);
     const thr255 = pn(p, "threshold", 0.7) * 255;
     const radius = Math.max(0.5, pn(p, "radius", 12) * u);
+    if (ps(p, "quality", "gaussian") === "dual") {
+      runBloomDual(ctx, intensity, thr255, radius, dims);
+      return;
+    }
     runBloomChain(ctx, intensity, thr255, radius);
   },
 };

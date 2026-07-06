@@ -464,6 +464,19 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "threshold", label: "Threshold", min: 0, max: 1, step: 0.01, default: 0.7 },
       { kind: "slider", key: "intensity", label: "Intensity", min: 0, max: 1.5, step: 0.01, default: 0.5 },
       { kind: "slider", key: "radius", label: "Radius", min: 0, max: 40, step: 0.5, default: 12, unit: true },
+      {
+        kind: "select",
+        key: "quality",
+        label: "Quality",
+        options: [
+          { value: "gaussian", label: "gaussian" },
+          { value: "dual", label: "dual filter" },
+        ],
+        // dual = mip-chain dual filter (GL preview look authority; still
+        // export renders the gaussian equivalent — accepted divergence,
+        // same class as the blur family's Skia-vs-true-gaussian shape).
+        default: "gaussian",
+      },
     ],
   },
   lightRays: {

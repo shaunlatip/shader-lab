@@ -121,7 +121,7 @@ export class GLEngine implements RenderEngine {
     this.baseSig = null; // buffer contents are gone — force a recomposite
   }
 
-  /** F5a pooled same-size temp target. */
+  /** F5a/F5b pooled temp target (key carries the size for sized temps). */
   private tempTex(name: string, W: number, H: number): GLTexture {
     let tx = this.temps.get(name);
     if (!tx || tx.w !== W || tx.h !== H) {
@@ -230,11 +230,16 @@ export class GLEngine implements RenderEngine {
         const ctx: MultiPassCtx = {
           input: { tex: inputTex.tex },
           output: { tex: outputTex.tex },
-          temp: (name) => ({ tex: this.tempTex(name, W, H).tex }),
+          // F5b: temps may be a different size (mip chains). Pool key includes
+          // the size — two ops sharing a temp name at different sizes would
+          // otherwise thrash delete/create every frame.
+          temp: (name, w, h) => ({ tex: this.tempTex(`${name}@${w ?? W}x${h ?? H}`, w ?? W, h ?? H).tex }),
           run: (frag, dst, reads, set) => {
             const dstGL = dst.tex === outputTex.tex ? outputTex : this.tempByTex(dst.tex);
             this.glc.pass(this.glc.program(frag), dstGL, reads, (g, pr) => {
-              setCommon(this.glc, g, pr, W, H, u, t);
+              // common uniforms describe the DESTINATION (u_dims drives the
+              // v_uv→px mapping); identical to W,H for same-size temps.
+              setCommon(this.glc, g, pr, dstGL.w, dstGL.h, u, t);
               set?.(g, pr);
             });
           },
