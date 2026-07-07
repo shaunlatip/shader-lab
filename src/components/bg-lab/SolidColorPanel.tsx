@@ -37,7 +37,9 @@ export function SolidColorPanel() {
           const hex = formats.hex.slice(0, 7).toLowerCase();
           if (/^#[0-9a-f]{6}$/.test(hex) && hex !== color) set(hex);
         }}
-        className="flex flex-col gap-2.5"
+        // inline surface: strip the Root's popover chrome + 280px cap so the
+        // picker spans the panel
+        className="max-w-none flex-col gap-2.5 rounded-none border-0 bg-transparent p-0 shadow-none"
       >
         <ColorPicker.Area className="h-40 w-full rounded-control" />
         <div className="flex items-center gap-2">

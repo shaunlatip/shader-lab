@@ -53,7 +53,7 @@ export function LabHeader({
           spellCheck={false}
           aria-label="Draft name"
           placeholder={suggested}
-          className="min-w-0 max-w-[280px] rounded-control border border-transparent bg-transparent px-2 py-1 text-[13px] font-medium text-text-primary outline-none transition-colors placeholder:text-text-secondary hover:border-border-default focus:border-border-strong"
+          className="min-w-[100px] max-w-[440px] flex-shrink rounded-control border border-transparent bg-transparent px-2 py-1 text-[13px] font-medium text-text-primary outline-none transition-colors [field-sizing:content] placeholder:text-text-secondary hover:border-border-default focus:border-border-strong"
         />
       </div>
       <div className="flex shrink-0 items-center gap-2">
