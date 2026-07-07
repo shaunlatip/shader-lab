@@ -83,8 +83,16 @@ export function makeDefaultConfig(): BgConfig {
   };
 }
 
+export type PresetCategory = "Print" | "Text" | "Film" | "Grade" | "Glitch";
+
 export interface Preset {
+  /** Stable key — names the pre-rendered thumbnail at /presets/<slug>.webp. */
+  slug: string;
   name: string;
+  category: PresetCategory;
+  /** Heroes appear as thumbnail cards in the gallery; the rest live behind
+   * the all-presets search. */
+  curated?: boolean;
   build: () => Effect[];
 }
 
@@ -157,31 +165,32 @@ export function inspire(): BgConfig {
   };
 }
 
-// Curated looks distilled from the effect explorations. Applying a preset
-// replaces the current stack (source + output are kept).
+// The preset library. 14 curated heroes render as thumbnail cards in the
+// gallery (grouped by category); the rest are reachable through the
+// all-presets search. Applying a preset replaces the current stack
+// (source + output are kept). Slugs are stable — they name the pre-rendered
+// thumbnails in /public/presets/.
 export const PRESETS: Preset[] = [
+  // ---------------------------------------------------------------- Print
   {
-    name: "Pixel + grain",
-    build: () => [withParams("pixelate", { size: 14 }), withParams("grain", { amount: 0.18 })],
-  },
-  {
+    slug: "newsprint",
     name: "Newsprint",
+    category: "Print",
+    curated: true,
     build: () => [makeEffect("grayscale"), withParams("halftone", { cell: 8, mode: "mono", aa: true })],
   },
   {
+    slug: "cmyk-print",
     name: "CMYK print",
+    category: "Print",
+    curated: true,
     build: () => [withParams("halftone", { cell: 9, mode: "cmyk", aa: true })],
   },
   {
-    name: "Floyd dither",
-    build: () => [withParams("dither", { type: "floydSteinberg", levels: 2, mono: true })],
-  },
-  {
-    name: "Blue noise",
-    build: () => [withParams("dither", { type: "blueNoise", levels: 2, mono: true })],
-  },
-  {
+    slug: "risograph",
     name: "Risograph",
+    category: "Print",
+    curated: true,
     build: () => [
       withParams("posterize", { levels: 4 }),
       makeEffect("gradientMap"),
@@ -189,11 +198,134 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
+    slug: "floyd-dither",
+    name: "Floyd dither",
+    category: "Print",
+    curated: true,
+    build: () => [withParams("dither", { type: "floydSteinberg", levels: 2, mono: true })],
+  },
+  {
+    slug: "crosshatch",
+    name: "Crosshatch",
+    category: "Print",
+    curated: true,
+    build: () => [makeEffect("grayscale"), withParams("crosshatch", { cell: 9 })],
+  },
+  {
+    slug: "halftone-dots",
+    name: "Halftone dots",
+    category: "Print",
+    curated: true,
+    build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
+  },
+  {
+    slug: "blue-noise",
+    name: "Blue noise",
+    category: "Print",
+    build: () => [withParams("dither", { type: "blueNoise", levels: 2, mono: true })],
+  },
+  {
+    slug: "coarse-bayer",
+    name: "Coarse Bayer",
+    category: "Print",
+    build: () => [withParams("dither", { type: "bayer8", levels: 2, scale: 3, mono: true })],
+  },
+  {
+    slug: "floyd-colour",
+    name: "Floyd colour",
+    category: "Print",
+    build: () => [withParams("dither", { type: "floydSteinberg", levels: 3, mono: false })],
+  },
+  {
+    slug: "halftone-rings",
+    name: "Halftone rings",
+    category: "Print",
+    build: () => [makeEffect("grayscale"), withParams("halftone", { cell: 12, mode: "mono", dotShape: "ring" })],
+  },
+  {
+    slug: "threshold-ink",
+    name: "Threshold ink",
+    category: "Print",
+    build: () => [withParams("threshold", { level: 0.5 }), withParams("grain", { amount: 0.1 })],
+  },
+  {
+    slug: "engraving",
+    name: "Engraving",
+    category: "Print",
+    build: () => [makeEffect("grayscale"), withParams("diagonal", { cell: 9 })],
+  },
+
+  // ---------------------------------------------------------------- Text
+  {
+    slug: "ascii-art",
+    name: "ASCII art",
+    category: "Text",
+    curated: true,
+    build: () => [withParams("ascii", { cell: 10, ink: "#e9e4d8", paper: "#16140f" }), withParams("grain", { amount: 0.08 })],
+  },
+  {
+    slug: "block-print",
+    name: "Block print",
+    category: "Text",
+    curated: true,
+    build: () => [withParams("blockChars", { cell: 9, colorMode: "source" })],
+  },
+  {
+    slug: "ascii-glow",
+    name: "ASCII glow",
+    category: "Text",
+    build: () => [
+      withParams("ascii", { cell: 9, ink: "#9affc0", paper: "#04120a" }),
+      withParams("characterBloom", { intensity: 0.8, threshold: 0.4 }),
+    ],
+  },
+  {
+    slug: "diamonds",
+    name: "Diamonds",
+    category: "Text",
+    build: () => [withParams("diamond", { cell: 12, colorMode: "source", paper: "#101010" })],
+  },
+  {
+    slug: "rain-lines",
+    name: "Rain lines",
+    category: "Text",
+    build: () => [withParams("lines", { cell: 7 })],
+  },
+
+  // ---------------------------------------------------------------- Film
+  {
+    slug: "sepia-film",
     name: "Sepia film",
+    category: "Film",
+    curated: true,
     build: () => [makeEffect("gradientMap"), withParams("grain", { amount: 0.16 }), withParams("vignette", { amount: 0.5 })],
   },
   {
+    slug: "heavy-grain",
+    name: "Heavy grain",
+    category: "Film",
+    curated: true,
+    build: () => [makeEffect("grayscale"), withParams("grain", { amount: 0.5, mono: true })],
+  },
+  {
+    slug: "soft-focus",
+    name: "Soft focus",
+    category: "Film",
+    build: () => [withParams("blur", { radius: 10 }), withParams("bloom", { intensity: 0.6, threshold: 0.65 })],
+  },
+  {
+    slug: "bloom",
+    name: "Bloom",
+    category: "Film",
+    build: () => [withParams("adjust", { contrast: 1.15, saturation: 1.2 }), withParams("bloom", { intensity: 0.8, threshold: 0.6 })],
+  },
+
+  // ---------------------------------------------------------------- Grade
+  {
+    slug: "duotone",
     name: "Duotone",
+    category: "Grade",
+    curated: true,
     build: () => [
       withParams("gradientMap", {
         stops: [
@@ -204,104 +336,25 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
-    name: "Chromatic",
-    build: () => [withParams("chromatic", { amount: 8 }), withParams("grain", { amount: 0.12 })],
-  },
-  {
-    name: "CRT",
-    build: () => [
-      withParams("scanlines", { spacing: 3, intensity: 0.4 }),
-      withParams("chromatic", { amount: 3 }),
-      withParams("vignette", { amount: 0.5 }),
-    ],
-  },
-  {
-    name: "Bloom",
-    build: () => [withParams("adjust", { contrast: 1.15, saturation: 1.2 }), withParams("bloom", { intensity: 0.8, threshold: 0.6 })],
-  },
-  {
-    name: "Warp",
-    build: () => [withParams("displace", { amount: 24, scale: 4 }), makeEffect("grayscale")],
-  },
-  {
-    name: "Threshold ink",
-    build: () => [withParams("threshold", { level: 0.5 }), withParams("grain", { amount: 0.1 })],
-  },
-  // --- More looks ported from the effect explorations ---
-  {
-    name: "Pixel dots",
-    build: () => [withParams("pixelate", { size: 22, shape: "circle" }), withParams("grain", { amount: 0.12 })],
-  },
-  {
-    name: "Pixel diamonds",
-    build: () => [withParams("pixelate", { size: 24, shape: "diamond" })],
-  },
-  {
-    name: "Halftone rings",
-    build: () => [makeEffect("grayscale"), withParams("halftone", { cell: 12, mode: "mono", dotShape: "ring" })],
-  },
-  {
-    name: "Bayer dither",
-    build: () => [withParams("dither", { type: "bayer4", levels: 2, mono: true })],
-  },
-  {
-    name: "Coarse Bayer",
-    build: () => [withParams("dither", { type: "bayer8", levels: 2, scale: 3, mono: true })],
-  },
-  {
-    name: "Floyd colour",
-    build: () => [withParams("dither", { type: "floydSteinberg", levels: 3, mono: false })],
-  },
-  {
-    name: "Sine warp",
-    build: () => [withParams("displace", { amount: 30, scale: 4, type: "sine" })],
-  },
-  {
-    name: "Scanlines RGB",
-    build: () => [withParams("scanlines", { spacing: 6, intensity: 0.6, rgbCells: true })],
-  },
-  {
-    name: "Poster pop",
-    build: () => [withParams("posterize", { levels: 5, perChannel: true }), withParams("adjust", { saturation: 1.4, contrast: 1.1 })],
-  },
-  {
-    name: "Colour wash",
-    build: () => [withParams("tint", { color: "#e8c9a8", opacity: 0.45, blend: "multiply" }), withParams("grain", { amount: 0.1 })],
-  },
-  {
-    name: "Soft focus",
-    build: () => [withParams("blur", { radius: 10 }), withParams("bloom", { intensity: 0.6, threshold: 0.65 })],
-  },
-  {
-    name: "Vignette fade",
-    build: () => [withParams("adjust", { contrast: 1.1 }), withParams("vignette", { amount: 0.8, radius: 0.7 })],
-  },
-  {
-    name: "Heavy grain",
-    build: () => [makeEffect("grayscale"), withParams("grain", { amount: 0.5, mono: true })],
-  },
-  // --- one-click colour grades ---
-  {
-    name: "Grade · B&W",
+    slug: "grade-bw",
+    name: "Black & white",
+    category: "Grade",
+    curated: true,
     build: () => [makeEffect("grayscale"), withParams("adjust", { contrast: 1.15 })],
   },
   {
+    slug: "grade-sepia",
     name: "Grade · Sepia",
+    category: "Grade",
     build: () => [
       makeEffect("grayscale"),
       withParams("gradientMap", { stops: [{ t: 0, color: "#241a12" }, { t: 1, color: "#f2e3cb" }], amount: 0.85 }),
     ],
   },
   {
-    name: "Grade · Warm",
-    build: () => [withParams("adjust", { temperature: 0.3, saturation: 1.1 })],
-  },
-  {
-    name: "Grade · Cool",
-    build: () => [withParams("adjust", { temperature: -0.3, saturation: 1.05 })],
-  },
-  {
+    slug: "grade-vintage",
     name: "Grade · Vintage",
+    category: "Grade",
     build: () => [
       withParams("adjust", { contrast: 0.9, saturation: 0.8 }),
       withParams("tint", { color: "#e8c9a8", opacity: 0.2, blend: "soft-light" }),
@@ -310,55 +363,27 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
-    name: "Grade · Fade",
-    build: () => [withParams("adjust", { contrast: 0.8, gamma: 1.25 })],
-  },
-  {
+    slug: "grade-cyber",
     name: "Grade · Cyber",
+    category: "Grade",
     build: () => [
       withParams("gradientMap", { stops: [{ t: 0, color: "#06122a" }, { t: 0.5, color: "#1ea7b6" }, { t: 1, color: "#f06" }], amount: 0.6 }),
       withParams("chromatic", { amount: 4 }),
     ],
   },
-  // --- converter / style looks (ascii-magic parity) ---
   {
-    name: "ASCII art",
-    build: () => [withParams("ascii", { cell: 10, ink: "#e9e4d8", paper: "#16140f" }), withParams("grain", { amount: 0.08 })],
+    slug: "poster-pop",
+    name: "Poster pop",
+    category: "Grade",
+    build: () => [withParams("posterize", { levels: 5, perChannel: true }), withParams("adjust", { saturation: 1.4, contrast: 1.1 })],
   },
+
+  // ---------------------------------------------------------------- Glitch
   {
-    name: "ASCII colour",
-    build: () => [withParams("ascii", { cell: 9, colorMode: "source", paper: "#0a0a0a" })],
-  },
-  {
-    name: "Block print",
-    build: () => [withParams("blockChars", { cell: 9, colorMode: "source" })],
-  },
-  {
-    name: "Crosshatch",
-    build: () => [makeEffect("grayscale"), withParams("crosshatch", { cell: 9 })],
-  },
-  {
-    name: "Diamonds",
-    build: () => [withParams("diamond", { cell: 12, colorMode: "source", paper: "#101010" })],
-  },
-  {
-    name: "Rain lines",
-    build: () => [withParams("lines", { cell: 7 })],
-  },
-  {
-    name: "Halftone dots",
-    build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
-  },
-  {
-    name: "Mosaic tiles",
-    build: () => [withParams("mosaic", { size: 22, gap: 0.12 })],
-  },
-  {
-    name: "LEGO",
-    build: () => [withParams("lego", { size: 24 })],
-  },
-  {
+    slug: "vhs-glitch",
     name: "VHS glitch",
+    category: "Glitch",
+    curated: true,
     build: () => [
       withParams("chromatic", { amount: 4, mode: "split" }),
       withParams("glitch", { amount: 0.45 }),
@@ -367,7 +392,10 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
+    slug: "crt-curve",
     name: "CRT curve",
+    category: "Glitch",
+    curated: true,
     build: () => [
       withParams("scanlines", { spacing: 3, intensity: 0.35 }),
       withParams("crtCurvature", { amount: 0.3, edge: 0.4 }),
@@ -375,10 +403,64 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
-    name: "ASCII glow",
+    slug: "chromatic",
+    name: "Chromatic",
+    category: "Glitch",
+    build: () => [withParams("chromatic", { amount: 8 }), withParams("grain", { amount: 0.12 })],
+  },
+  {
+    slug: "scanlines-rgb",
+    name: "Scanlines RGB",
+    category: "Glitch",
+    build: () => [withParams("scanlines", { spacing: 6, intensity: 0.6, rgbCells: true })],
+  },
+  {
+    slug: "sine-warp",
+    name: "Sine warp",
+    category: "Glitch",
+    build: () => [withParams("displace", { amount: 30, scale: 4, type: "sine" })],
+  },
+  {
+    slug: "warp",
+    name: "Warp",
+    category: "Glitch",
+    build: () => [withParams("displace", { amount: 24, scale: 4 }), makeEffect("grayscale")],
+  },
+  {
+    slug: "pixel-grain",
+    name: "Pixel + grain",
+    category: "Glitch",
+    build: () => [withParams("pixelate", { size: 14 }), withParams("grain", { amount: 0.18 })],
+  },
+  {
+    slug: "pixel-dots",
+    name: "Pixel dots",
+    category: "Glitch",
+    build: () => [withParams("pixelate", { size: 22, shape: "circle" }), withParams("grain", { amount: 0.12 })],
+  },
+  {
+    slug: "mosaic-tiles",
+    name: "Mosaic tiles",
+    category: "Glitch",
+    build: () => [withParams("mosaic", { size: 22, gap: 0.12 })],
+  },
+  {
+    slug: "lego",
+    name: "LEGO",
+    category: "Glitch",
+    build: () => [withParams("lego", { size: 24 })],
+  },
+  {
+    slug: "crt",
+    name: "CRT",
+    category: "Glitch",
     build: () => [
-      withParams("ascii", { cell: 9, ink: "#9affc0", paper: "#04120a" }),
-      withParams("characterBloom", { intensity: 0.8, threshold: 0.4 }),
+      withParams("scanlines", { spacing: 3, intensity: 0.4 }),
+      withParams("chromatic", { amount: 3 }),
+      withParams("vignette", { amount: 0.5 }),
     ],
   },
 ];
+
+export const CURATED_PRESETS = PRESETS.filter((p) => p.curated);
+export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Print", "Text", "Film", "Grade", "Glitch"];

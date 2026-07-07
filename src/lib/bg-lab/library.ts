@@ -25,7 +25,7 @@ export const DRAFTS_KEY = "bg-lab/drafts/v1";
 
 /** Built-in preset looks, materialized as saved effects. */
 export function builtinSaved(): SavedEffect[] {
-  return PRESETS.map((p, i) => ({ id: `builtin-${i}`, name: p.name, stack: p.build(), builtin: true }));
+  return PRESETS.map((p) => ({ id: `builtin-${p.slug}`, name: p.name, stack: p.build(), builtin: true }));
 }
 
 /** Fresh ids + cloned params so a loaded stack is independent of the stored one. */

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AddEffectSearch } from "./AddEffectSearch";
 import { EffectStack } from "./EffectStack";
-import { SavedPanel } from "./SavedPanel";
+import { PresetGallery } from "./PresetGallery";
 import { AiConfigCard } from "./AiConfigCard";
 
 /**
@@ -62,7 +62,7 @@ export function RightPanel({
         <div className="flex flex-col gap-5 p-3">
           <EffectStack />
           <div className="border-t border-border-default pt-4">
-            <SavedPanel />
+            <PresetGallery />
           </div>
           <div className="border-t border-border-default pt-4">
             <AiConfigCard />
