@@ -4,7 +4,7 @@
 import type { BgConfig, Dims } from "../../types";
 import { unit } from "../../resolution";
 import type { EngineSource, RenderEngine } from "../types";
-import { ctx2d } from "./util";
+import { ctx2d, tmpCanvas } from "./util";
 import { drawTransformedSource } from "./sourceTransform";
 import { drawPattern } from "./patterns";
 import { OPS } from "./ops";
@@ -50,7 +50,9 @@ export class CpuEngine implements RenderEngine {
     });
     const ref = this.src?.kind === "image" ? this.src.image : this.src?.kind === "video" ? this.src.video : null;
     if (isVideo || sig !== this.baseSig || ref !== this.baseRef || !this.baseCanvas) {
-      if (!this.baseCanvas) this.baseCanvas = target.ownerDocument.createElement("canvas");
+      // tmpCanvas (not ownerDocument.createElement) so the engine also runs in
+      // a worker, where the target is an OffscreenCanvas with no document.
+      if (!this.baseCanvas) this.baseCanvas = tmpCanvas(target, W, H);
       if (this.baseCanvas.width !== W) this.baseCanvas.width = W;
       if (this.baseCanvas.height !== H) this.baseCanvas.height = H;
       const bctx = ctx2d(this.baseCanvas);

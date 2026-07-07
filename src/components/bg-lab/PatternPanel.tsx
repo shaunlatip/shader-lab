@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ControlSpec } from "@/lib/bg-lab/catalog";
 import type { PatternState, PatternType } from "@/lib/bg-lab/types";
-import { DEFAULT_PATTERN } from "@/hooks/useImageSource";
+import { DEFAULT_PATTERN } from "@/lib/bg-lab/patternCatalog";
 import { cn } from "@/lib/utils";
 import { useBgLab } from "./BgLabProvider";
 import { ControlRow } from "./controls/ControlRow";
@@ -18,14 +18,24 @@ const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
   { value: "rings", label: "Rings" },
   { value: "checker", label: "Checker" },
   { value: "iso", label: "Iso lattice" },
+  { value: "moire", label: "Moiré" },
+  { value: "hex", label: "Hex grid" },
+  { value: "truchet", label: "Truchet" },
+  { value: "voronoi", label: "Voronoi" },
+  { value: "fbm", label: "Noise (fbm)" },
+  { value: "clouds", label: "Clouds" },
+  { value: "sky", label: "Sky" },
+  { value: "caustics", label: "Caustics" },
 ];
 
 // Controls only render for the types they affect — Angle on a dot grid or
 // Stagger on rings were dead knobs that made the panel read untrustworthy.
+// Generative fields repurpose knobs (see each draw's doc comment); they're
+// listed here under whichever knob they actually read.
 const APPLIES: Partial<Record<string, PatternType[]>> = {
-  angle: ["stripes", "waves", "halftoneGradient"],
-  jitter: ["dotGrid", "iso", "plusGrid"],
-  stagger: ["dotGrid", "halftoneGradient"],
+  angle: ["stripes", "waves", "halftoneGradient", "moire", "fbm", "clouds", "sky", "caustics"],
+  jitter: ["dotGrid", "iso", "plusGrid", "moire", "fbm", "clouds", "sky", "caustics"],
+  stagger: ["dotGrid", "halftoneGradient", "voronoi", "caustics"],
 };
 
 const GEOMETRY: ControlSpec[] = [
@@ -68,6 +78,17 @@ const PATTERN_PRESETS: Partial<Record<PatternType, { name: string; patch: Partia
   ],
   waves: [
     { name: "Topo", patch: { cell: 22, weight: 0.14, angle: 0, fg: "#a6a29b", bg: "#f5f4f1" } },
+  ],
+  clouds: [
+    { name: "Fair day", patch: { cell: 42, weight: 0.35, jitter: 0.3, angle: 60, fg: "#f6f4ef", bg: "#a8c4dd" } },
+    { name: "Dusk", patch: { cell: 48, weight: 0.45, jitter: 0.25, angle: -20, fg: "#e8c9a8", bg: "#3a3550" } },
+  ],
+  sky: [
+    { name: "Golden hour", patch: { cell: 26, weight: 0.5, jitter: 0.35, angle: 20, fg: "#f3c98a", bg: "#7a9cc4" } },
+    { name: "High noon", patch: { cell: 18, weight: 0.35, jitter: 0.2, angle: 80, fg: "#dce8f2", bg: "#4d7fc0" } },
+  ],
+  caustics: [
+    { name: "Pool", patch: { cell: 52, weight: 0.3, jitter: 0.35, angle: 0, stagger: false, fg: "#dff3f6", bg: "#1e6f8e" } },
   ],
 };
 

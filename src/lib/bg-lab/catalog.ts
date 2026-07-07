@@ -280,6 +280,10 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         ],
         default: "square",
       },
+      // Progressive depixelation (Heckel C9): block halves per step and loops.
+      { kind: "switch", key: "animate", label: "Animate", default: false },
+      { kind: "slider", key: "speed", label: "Speed", min: 0.25, max: 4, step: 0.25, default: 1, showIf: { key: "animate", in: [true] } },
+      { kind: "slider", key: "steps", label: "Steps", min: 2, max: 7, step: 1, default: 5, showIf: { key: "animate", in: [true] } },
     ],
   },
   posterize: {
@@ -320,6 +324,10 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "pixelate", label: "Pixelate", min: 0, max: 16, step: 1, default: 0, unit: true },
       { kind: "switch", key: "mono", label: "Monochrome", default: false },
       { kind: "switch", key: "serpentine", label: "Serpentine (FS)", default: true },
+      // Animated blue-noise scroll (golden-ratio rank rotation). blueNoise only:
+      // Bayer/stripes have no meaningful temporal ordering, diffusion has no matrix.
+      { kind: "switch", key: "animate", label: "Animate", default: false, showIf: { key: "type", in: ["blueNoise"] } },
+      { kind: "slider", key: "speed", label: "Speed", min: 0.25, max: 4, step: 0.25, default: 1, showIf: { key: "type", in: ["blueNoise"] } },
     ],
   },
   halftone: {
@@ -358,6 +366,8 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "switch", key: "aa", label: "Anti-alias", default: true },
       { kind: "switch", key: "stagger", label: "Stagger", default: false },
       { kind: "switch", key: "invertCells", label: "Invert cells", default: false },
+      { kind: "slider", key: "overflow", label: "Overflow", min: 0, max: 1, step: 0.01, default: 0 },
+      { kind: "slider", key: "gooey", label: "Gooey", min: 0, max: 1, step: 0.01, default: 0 },
       { kind: "color", key: "ink", label: "Ink", default: "#191512" },
       { kind: "color", key: "paper", label: "Paper", default: "#f1ece4" },
     ],
@@ -406,6 +416,7 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "amount", label: "Amount", min: 0, max: 0.7, step: 0.01, default: 0.14 },
       { kind: "slider", key: "size", label: "Size", min: 1, max: 6, step: 0.5, default: 1.5, unit: true },
       { kind: "switch", key: "mono", label: "Monochrome", default: true },
+      { kind: "switch", key: "animate", label: "Animate", default: true },
       { kind: "select", key: "blend", label: "Blend", options: BLENDS, default: "soft-light" },
     ],
   },
@@ -445,7 +456,19 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         ],
         default: "radial",
       },
-      { kind: "slider", key: "samples", label: "Samples", min: 1, max: 16, step: 1, default: 1 },
+      // default 6 since the GL pass landed — multi-sample is free on GPU and
+      // the smeared dispersion reads much better than the hard 1-sample split
+      { kind: "slider", key: "samples", label: "Samples", min: 1, max: 16, step: 1, default: 6 },
+      {
+        kind: "select",
+        key: "quality",
+        label: "Quality",
+        options: [
+          { value: "normal", label: "normal" },
+          { value: "high", label: "high" },
+        ],
+        default: "normal",
+      },
       { kind: "slider", key: "saturation", label: "Saturation", min: 0, max: 2, step: 0.01, default: 1 },
     ],
   },
@@ -482,6 +505,46 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "threshold", label: "Threshold", min: 0, max: 1, step: 0.01, default: 0.7 },
       { kind: "slider", key: "intensity", label: "Intensity", min: 0, max: 1.5, step: 0.01, default: 0.5 },
       { kind: "slider", key: "radius", label: "Radius", min: 0, max: 40, step: 0.5, default: 12, unit: true },
+      {
+        kind: "select",
+        key: "quality",
+        label: "Quality",
+        options: [
+          { value: "gaussian", label: "gaussian" },
+          { value: "dual", label: "dual filter" },
+        ],
+        // dual = mip-chain dual filter (GL preview look authority; still
+        // export renders the gaussian equivalent — accepted divergence,
+        // same class as the blur family's Skia-vs-true-gaussian shape).
+        default: "gaussian",
+      },
+    ],
+  },
+  lightRays: {
+    type: "lightRays",
+    category: "post",
+    label: "Light rays",
+    blurb: "Crepuscular rays from a light position over bright areas",
+    heavy: true,
+    controls: [
+      { kind: "slider", key: "x", label: "Light X", min: 0, max: 100, step: 1, default: 50 },
+      { kind: "slider", key: "y", label: "Light Y", min: 0, max: 100, step: 1, default: 25 },
+      { kind: "slider", key: "threshold", label: "Threshold", min: 0, max: 1, step: 0.01, default: 0.6 },
+      { kind: "slider", key: "samples", label: "Quality", min: 8, max: 64, step: 4, default: 32 },
+      { kind: "slider", key: "density", label: "Length", min: 0.1, max: 1, step: 0.01, default: 0.8 },
+      { kind: "slider", key: "decay", label: "Decay", min: 0.8, max: 1, step: 0.005, default: 0.95 },
+      { kind: "slider", key: "strength", label: "Strength", min: 0, max: 2, step: 0.01, default: 0.7 },
+      { kind: "color", key: "color", label: "Tint", default: "#ffe3b8" },
+      {
+        kind: "select",
+        key: "blend",
+        label: "Blend",
+        options: [
+          { value: "screen", label: "screen" },
+          { value: "add", label: "add" },
+        ],
+        default: "screen",
+      },
     ],
   },
   sharpen: {
@@ -658,6 +721,52 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     heavy: true,
     controls: [{ kind: "slider", key: "size", label: "Brick size", min: 8, max: 80, step: 1, default: 22, unit: true }],
   },
+  receipt: {
+    type: "receipt",
+    category: "converter",
+    label: "Receipt print",
+    blurb: "Thermal-printer scanline bars",
+    controls: [
+      { kind: "slider", key: "size", label: "Band size", min: 2, max: 16, step: 1, default: 5, unit: true },
+      { kind: "slider", key: "contrast", label: "Contrast", min: 0.5, max: 3, step: 0.05, default: 1.2 },
+      { kind: "color", key: "ink", label: "Ink", default: "#1a1a1a" },
+      { kind: "color", key: "paper", label: "Paper", default: "#f6f3ea" },
+    ],
+  },
+  flutedGlass: {
+    type: "flutedGlass",
+    category: "converter",
+    label: "Fluted glass",
+    blurb: "Vertical reeded-glass refraction with rib highlights",
+    controls: [
+      { kind: "slider", key: "size", label: "Rib width", min: 4, max: 64, step: 1, default: 18, unit: true },
+      { kind: "slider", key: "amount", label: "Refraction", min: 0, max: 1, step: 0.01, default: 0.5 },
+      { kind: "slider", key: "specular", label: "Specular", min: 0, max: 1, step: 0.01, default: 0.35 },
+    ],
+  },
+  ledPanel: {
+    type: "ledPanel",
+    category: "converter",
+    label: "LED panel",
+    blurb: "RGB sub-pixel LED matrix with bezel grid",
+    controls: [
+      { kind: "slider", key: "size", label: "Cell size", min: 6, max: 48, step: 1, default: 14, unit: true },
+      { kind: "slider", key: "gap", label: "Bezel gap", min: 0, max: 0.45, step: 0.01, default: 0.18 },
+      { kind: "switch", key: "stagger", label: "Stagger", default: false },
+      { kind: "slider", key: "glow", label: "Glow", min: 0, max: 1, step: 0.01, default: 0.25 },
+    ],
+  },
+  crochet: {
+    type: "crochet",
+    category: "converter",
+    label: "Crochet",
+    blurb: "Yarn V-stitches over fabric rows",
+    controls: [
+      { kind: "slider", key: "size", label: "Stitch size", min: 8, max: 48, step: 1, default: 18, unit: true },
+      { kind: "slider", key: "yarnWidth", label: "Yarn width", min: 0.1, max: 0.5, step: 0.01, default: 0.3 },
+      { kind: "color", key: "paper", label: "Fabric", default: "#2a2320" },
+    ],
+  },
   lineArt: {
     type: "lineArt",
     category: "converter",
@@ -673,13 +782,18 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
           { value: "outline", label: "outline" },
           { value: "hatch", label: "hatch" },
           { value: "ink", label: "ink" },
+          { value: "xdog", label: "XDoG" },
         ],
         default: "outline",
       },
       { kind: "slider", key: "thickness", label: "Thickness", min: 1, max: 4, step: 0.1, default: 1.5, unit: true },
+      // Reused by xdog mode as epsilon = threshold * 0.1 (default 0.5 -> eps 0.05).
       { kind: "slider", key: "threshold", label: "Threshold", min: 0, max: 1, step: 0.01, default: 0.5 },
       { kind: "slider", key: "wiggle", label: "Wiggle", min: 0, max: 1, step: 0.01, default: 0 },
       { kind: "slider", key: "hatchSpacing", label: "Hatch spacing", min: 4, max: 16, step: 1, default: 8, unit: true },
+      // xdog-only params: gaussian sigma (unit-scaled) and the tanh soft-knee gain (phi).
+      { kind: "slider", key: "sigma", label: "XDoG sigma", min: 0.5, max: 8, step: 0.1, default: 2, unit: true },
+      { kind: "slider", key: "edgeSoftness", label: "XDoG edge softness", min: 1, max: 40, step: 0.5, default: 10 },
       { kind: "color", key: "ink", label: "Ink", default: "#16140f" },
       { kind: "color", key: "paper", label: "Paper", default: "#f1ece4" },
     ],
@@ -698,10 +812,17 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         options: [
           { value: "fast", label: "fast" },
           { value: "smooth", label: "smooth" },
+          { value: "anisotropic", label: "anisotropic" },
         ],
-        default: "fast",
+        // smooth is the better look and costs the same on the GL pass
+        // (0.083 ms/frame); the CPU engine only pays it on still export.
+        // anisotropic (Kyprianidis) aligns strokes to image flow — the
+        // "painted" look; radius caps at 8 in that mode (ellipse reach 2R).
+        default: "smooth",
       },
       { kind: "slider", key: "radius", label: "Radius", min: 2, max: 12, step: 1, default: 4, unit: true },
+      { kind: "slider", key: "anisotropy", label: "Stroke elongation", min: 0.25, max: 2, step: 0.05, default: 1, showIf: { key: "quality", in: ["anisotropic"] } },
+      { kind: "slider", key: "sharpness", label: "Sector sharpness", min: 2, max: 16, step: 1, default: 8, showIf: { key: "quality", in: ["anisotropic"] } },
     ],
   },
 
@@ -767,6 +888,10 @@ export const EFFECT_ORDER: EffectType[] = [
   "braille",
   "mosaic",
   "lego",
+  "receipt",
+  "flutedGlass",
+  "ledPanel",
+  "crochet",
   "pixelate",
   "dither",
   "halftone",
@@ -786,6 +911,7 @@ export const EFFECT_ORDER: EffectType[] = [
   "chromatic",
   "displace",
   "bloom",
+  "lightRays",
   "characterBloom",
   "scanlines",
   "crtCurvature",
@@ -794,6 +920,16 @@ export const EFFECT_ORDER: EffectType[] = [
   "filmDust",
   "vignette",
 ];
+
+// Dev-only sanity: EFFECT_ORDER must be a duplicate-free permutation of the
+// catalog keys — a missed entry silently hides an effect from the add menu.
+if (process.env.NODE_ENV !== "production") {
+  const order = new Set(EFFECT_ORDER);
+  if (order.size !== EFFECT_ORDER.length) throw new Error("EFFECT_ORDER contains duplicates");
+  for (const type of Object.keys(EFFECT_CATALOG)) {
+    if (!order.has(type as EffectType)) throw new Error(`EFFECT_ORDER is missing "${type}"`);
+  }
+}
 
 function cloneStops(stops: GradientStop[]): GradientStop[] {
   return stops.map((s) => ({ ...s }));

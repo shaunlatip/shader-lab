@@ -29,6 +29,7 @@ export type EffectType =
   | "bloom"
   | "sharpen"
   | "displace"
+  | "lightRays"
   // converters / styles
   | "ascii"
   | "blockChars"
@@ -41,6 +42,10 @@ export type EffectType =
   | "braille"
   | "mosaic"
   | "lego"
+  | "receipt"
+  | "flutedGlass"
+  | "ledPanel"
+  | "crochet"
   // post parity (Phase 4)
   | "crtCurvature"
   | "glitch"
@@ -69,17 +74,30 @@ export interface SourceTransform {
   crop?: { x: number; y: number; w: number; h: number };
 }
 
-export type PatternType =
-  | "dotGrid"
-  | "lineGrid"
-  | "graph"
-  | "checker"
-  | "stripes"
-  | "waves"
-  | "rings"
-  | "iso"
-  | "plusGrid"
-  | "halftoneGradient";
+/** Runtime list so schema validation can check pasted pattern types — a const
+ * array of literals keeps this file serialization-clean. */
+export const PATTERN_TYPES = [
+  "dotGrid",
+  "lineGrid",
+  "graph",
+  "checker",
+  "stripes",
+  "waves",
+  "rings",
+  "iso",
+  "plusGrid",
+  "halftoneGradient",
+  "moire",
+  "hex",
+  "truchet",
+  "voronoi",
+  "fbm",
+  "clouds",
+  "sky",
+  "caustics",
+] as const;
+
+export type PatternType = (typeof PATTERN_TYPES)[number];
 
 export interface PatternState {
   type: PatternType;

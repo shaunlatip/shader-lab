@@ -2,7 +2,7 @@
 
 import { nanoid } from "nanoid";
 import { defaultParams, EFFECT_CATALOG } from "./catalog";
-import type { BgConfig, Effect, EffectType, ParamValue } from "./types";
+import type { BgConfig, Effect, EffectType, ParamValue, SourceState } from "./types";
 
 export interface GalleryImage {
   id: string;
@@ -83,7 +83,7 @@ export function makeDefaultConfig(): BgConfig {
   };
 }
 
-export type PresetCategory = "Print" | "Text" | "Film" | "Grade" | "Glitch";
+export type PresetCategory = "Print" | "Text" | "Paint" | "Film" | "Grade" | "Glitch" | "Scene";
 
 export interface Preset {
   /** Stable key — names the pre-rendered thumbnail at /presets/<slug>.webp. */
@@ -93,6 +93,10 @@ export interface Preset {
   /** Heroes appear as thumbnail cards in the gallery; the rest live behind
    * the all-presets search. */
   curated?: boolean;
+  /** Optional source the preset carries (generative-source looks — clouds,
+   * caustics, sky). Merged into the current source on apply; presets without
+   * it keep the user's source, as before. */
+  source?: Partial<SourceState>;
   build: () => Effect[];
 }
 
@@ -103,7 +107,7 @@ function withParams(type: EffectType, params: Record<string, ParamValue>): Effec
   return e;
 }
 
-// ---------------------------------------------------------------- Inspire Me
+// ------------------------------------------------------------------ Randomize
 // Curated pools so a random look is coherent (a converter + a couple of mood
 // posts + maybe a grade), never a random pile of 20 effects.
 const STYLE_LOOKS: (() => Effect)[] = [
@@ -115,8 +119,12 @@ const STYLE_LOOKS: (() => Effect)[] = [
   () => withParams("mosaic", { size: 18, gap: 0.1 }),
   () => withParams("lego", { size: 22 }),
   () => withParams("halftone", { cell: 8, mode: "mono" }),
+  () => withParams("halftone", { cell: 12, gooey: 0.75, overflow: 0.3 }),
   () => withParams("dither", { type: "bayer4", levels: 3 }),
+  () => withParams("dither", { type: "blueNoise", levels: 2, mono: true }),
   () => withParams("diamond", { cell: 12, colorMode: "source", background: "original", charOpacity: 0.85 }),
+  () => withParams("kuwahara", { quality: "smooth", radius: 6 }),
+  () => withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }),
 ];
 const MOOD_POST: (() => Effect)[] = [
   () => withParams("grain", { amount: 0.14 }),
@@ -149,27 +157,65 @@ function jitterEffect(e: Effect): Effect {
   return { ...e, params };
 }
 
-/** A coherent ~3–4-effect random look on a random gallery source. */
-export function inspire(): BgConfig {
+/** The coherent ~3–4-effect random stack shared by both inspire flavours. */
+export function inspireStack(): Effect[] {
   const stack: Effect[] = [jitterEffect(pick(STYLE_LOOKS)())];
   if (Math.random() < 0.5) stack.push(jitterEffect(pick(GRADES)())); // grade after the style
   const moodCount = 1 + Math.floor(Math.random() * 2); // 1–2 moods
   const moods = [...MOOD_POST].sort(() => Math.random() - 0.5).slice(0, moodCount);
   for (const m of moods) stack.push(jitterEffect(m()));
+  return stack;
+}
+
+/** A coherent random look on a random gallery source (sync fallback). */
+export function inspire(): BgConfig {
   const img = pick(GALLERY);
   return {
     version: 1,
     output: { aspect: "3:2", longEdge: 2000 },
     source: { mode: "image", imageId: img.id, solidColor: "#cdd9e0" },
-    stack,
+    stack: inspireStack(),
   };
 }
 
-// The preset library. 14 curated heroes render as thumbnail cards in the
+/** A random Pexels photo (or video) url as an imageId. Random tag + page
+ * through /api/pexels, random pick from the results. Returns null when the
+ * key is missing (route returns 501), the fetch fails, or a page comes back
+ * empty — callers fall back to the gallery so the button always works. */
+export async function randomPexelsId(kind: "photo" | "video" = "photo"): Promise<string | null> {
+  try {
+    const tag = pick([...PEXELS_TAGS]);
+    const page = 1 + Math.floor(Math.random() * 3);
+    const r = await fetch(`/api/pexels?q=${encodeURIComponent(tag)}&page=${page}&type=${kind}`);
+    if (!r.ok) return null;
+    const data = (await r.json()) as { results?: { full: string }[] };
+    const results = data.results ?? [];
+    if (results.length === 0) return null;
+    const item = pick(results);
+    return kind === "video" ? `pexels:video:${item.full}` : `pexels:${item.full}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Inspire from a random Pexels photo, falling back to the gallery — the
+ * button must always produce a look. */
+export async function inspireFromPexels(): Promise<BgConfig> {
+  const id = await randomPexelsId("photo");
+  if (!id) return inspire();
+  return {
+    version: 1,
+    output: { aspect: "3:2", longEdge: 2000 },
+    source: { mode: "image", imageId: id, solidColor: "#cdd9e0" },
+    stack: inspireStack(),
+  };
+}
+
+// The preset library. Curated heroes render as thumbnail cards in the
 // gallery (grouped by category); the rest are reachable through the
 // all-presets search. Applying a preset replaces the current stack
-// (source + output are kept). Slugs are stable — they name the pre-rendered
-// thumbnails in /public/presets/.
+// (source + output are kept, unless the preset carries a `source`).
+// Slugs are stable — they name the pre-rendered thumbnails in /public/presets/.
 export const PRESETS: Preset[] = [
   // ---------------------------------------------------------------- Print
   {
@@ -219,10 +265,22 @@ export const PRESETS: Preset[] = [
     build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
   },
   {
+    slug: "gooey-halftone",
+    name: "Gooey halftone",
+    category: "Print",
+    build: () => [withParams("halftone", { cell: 12, gooey: 0.75, overflow: 0.3 })],
+  },
+  {
     slug: "blue-noise",
     name: "Blue noise",
     category: "Print",
     build: () => [withParams("dither", { type: "blueNoise", levels: 2, mono: true })],
+  },
+  {
+    slug: "bayer-dither",
+    name: "Bayer dither",
+    category: "Print",
+    build: () => [withParams("dither", { type: "bayer4", levels: 2, mono: true })],
   },
   {
     slug: "coarse-bayer",
@@ -271,6 +329,12 @@ export const PRESETS: Preset[] = [
     build: () => [withParams("blockChars", { cell: 9, colorMode: "source" })],
   },
   {
+    slug: "ascii-colour",
+    name: "ASCII colour",
+    category: "Text",
+    build: () => [withParams("ascii", { cell: 9, colorMode: "source", paper: "#0a0a0a" })],
+  },
+  {
     slug: "ascii-glow",
     name: "ASCII glow",
     category: "Text",
@@ -292,6 +356,32 @@ export const PRESETS: Preset[] = [
     build: () => [withParams("lines", { cell: 7 })],
   },
 
+  // ---------------------------------------------------------------- Paint
+  {
+    slug: "oil-paint",
+    name: "Oil paint",
+    category: "Paint",
+    curated: true,
+    build: () => [withParams("kuwahara", { quality: "smooth", radius: 6 }), withParams("adjust", { saturation: 1.15, contrast: 1.05 })],
+  },
+  {
+    slug: "ink-sketch",
+    name: "Ink sketch",
+    category: "Paint",
+    curated: true,
+    build: () => [withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }), withParams("grain", { amount: 0.06 })],
+  },
+  {
+    slug: "brushwork",
+    name: "Brushwork",
+    category: "Paint",
+    build: () => [
+      withParams("kuwahara", { quality: "anisotropic", radius: 7, anisotropy: 1.6 }),
+      withParams("adjust", { saturation: 1.15 }),
+      withParams("grain", { amount: 0.06 }),
+    ],
+  },
+
   // ---------------------------------------------------------------- Film
   {
     slug: "sepia-film",
@@ -306,6 +396,28 @@ export const PRESETS: Preset[] = [
     category: "Film",
     curated: true,
     build: () => [makeEffect("grayscale"), withParams("grain", { amount: 0.5, mono: true })],
+  },
+  {
+    slug: "golden-hour",
+    name: "Golden hour",
+    category: "Film",
+    curated: true,
+    build: () => [
+      withParams("lightRays", { y: 22, threshold: 0.55, strength: 0.9, color: "#ffcf9a" }),
+      withParams("tint", { color: "#e8a86a", opacity: 0.2, blend: "soft-light" }),
+      withParams("vignette", { amount: 0.35 }),
+    ],
+  },
+  {
+    slug: "god-rays",
+    name: "God rays",
+    category: "Film",
+    curated: true,
+    build: () => [
+      withParams("adjust", { contrast: 1.1 }),
+      withParams("lightRays", { samples: 48, density: 0.95, decay: 0.94, strength: 1.1 }),
+      withParams("grain", { amount: 0.08 }),
+    ],
   },
   {
     slug: "soft-focus",
@@ -352,6 +464,24 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
+    slug: "grade-warm",
+    name: "Grade · Warm",
+    category: "Grade",
+    build: () => [withParams("adjust", { temperature: 0.3, saturation: 1.1 })],
+  },
+  {
+    slug: "grade-cool",
+    name: "Grade · Cool",
+    category: "Grade",
+    build: () => [withParams("adjust", { temperature: -0.3, saturation: 1.05 })],
+  },
+  {
+    slug: "grade-fade",
+    name: "Grade · Fade",
+    category: "Grade",
+    build: () => [withParams("adjust", { contrast: 0.8, gamma: 1.25 })],
+  },
+  {
     slug: "grade-vintage",
     name: "Grade · Vintage",
     category: "Grade",
@@ -370,6 +500,18 @@ export const PRESETS: Preset[] = [
       withParams("gradientMap", { stops: [{ t: 0, color: "#06122a" }, { t: 0.5, color: "#1ea7b6" }, { t: 1, color: "#f06" }], amount: 0.6 }),
       withParams("chromatic", { amount: 4 }),
     ],
+  },
+  {
+    slug: "colour-wash",
+    name: "Colour wash",
+    category: "Grade",
+    build: () => [withParams("tint", { color: "#e8c9a8", opacity: 0.45, blend: "multiply" }), withParams("grain", { amount: 0.1 })],
+  },
+  {
+    slug: "vignette-fade",
+    name: "Vignette fade",
+    category: "Grade",
+    build: () => [withParams("adjust", { contrast: 1.1 }), withParams("vignette", { amount: 0.8, radius: 0.7 })],
   },
   {
     slug: "poster-pop",
@@ -409,6 +551,30 @@ export const PRESETS: Preset[] = [
     build: () => [withParams("chromatic", { amount: 8 }), withParams("grain", { amount: 0.12 })],
   },
   {
+    slug: "dispersion",
+    name: "Dispersion",
+    category: "Glitch",
+    build: () => [withParams("chromatic", { amount: 8, samples: 8, quality: "high" }), withParams("grain", { amount: 0.08 })],
+  },
+  {
+    slug: "vaporwave",
+    name: "Vaporwave",
+    category: "Glitch",
+    build: () => [
+      withParams("chromatic", { amount: 6, mode: "split" }),
+      withParams("scanlines", { spacing: 4, intensity: 0.3 }),
+      withParams("gradientMap", {
+        stops: [
+          { t: 0, color: "#2b0a4e" },
+          { t: 0.5, color: "#e83fb8" },
+          { t: 1, color: "#7df9ff" },
+        ],
+        amount: 0.75,
+      }),
+      withParams("grain", { amount: 0.12 }),
+    ],
+  },
+  {
     slug: "scanlines-rgb",
     name: "Scanlines RGB",
     category: "Glitch",
@@ -439,6 +605,12 @@ export const PRESETS: Preset[] = [
     build: () => [withParams("pixelate", { size: 22, shape: "circle" }), withParams("grain", { amount: 0.12 })],
   },
   {
+    slug: "pixel-diamonds",
+    name: "Pixel diamonds",
+    category: "Glitch",
+    build: () => [withParams("pixelate", { size: 24, shape: "diamond" })],
+  },
+  {
     slug: "mosaic-tiles",
     name: "Mosaic tiles",
     category: "Glitch",
@@ -460,7 +632,43 @@ export const PRESETS: Preset[] = [
       withParams("vignette", { amount: 0.5 }),
     ],
   },
+
+  // ---------------------------------------------------------------- Scene
+  // Generative-source looks — these carry a `source` (clouds/caustics/sky
+  // pattern) and replace it on apply, unlike every preset above.
+  {
+    slug: "storybook-clouds",
+    name: "Storybook clouds",
+    category: "Scene",
+    curated: true,
+    source: {
+      mode: "pattern",
+      pattern: { type: "clouds", cell: 22, weight: 0.5, jitter: 0.35, angle: 35, stagger: false, fg: "#f7f2e8", bg: "#8fb8d8" },
+    },
+    build: () => [withParams("grain", { amount: 0.1 }), withParams("vignette", { amount: 0.25 })],
+  },
+  {
+    slug: "poolside",
+    name: "Poolside",
+    category: "Scene",
+    curated: true,
+    source: {
+      mode: "pattern",
+      pattern: { type: "caustics", cell: 40, weight: 0.4, jitter: 0.3, angle: 0, stagger: true, fg: "#eafcff", bg: "#1f8ba8" },
+    },
+    build: () => [withParams("bloom", { intensity: 0.5, threshold: 0.6 }), withParams("tint", { color: "#9fe8f0", opacity: 0.15, blend: "screen" })],
+  },
+  {
+    slug: "sundown-sky",
+    name: "Sundown sky",
+    category: "Scene",
+    source: {
+      mode: "pattern",
+      pattern: { type: "sky", cell: 36, weight: 0.6, jitter: 0.35, angle: 25, stagger: false, fg: "#f2a65a", bg: "#2d4a7a" },
+    },
+    build: () => [withParams("grain", { amount: 0.08 })],
+  },
 ];
 
 export const CURATED_PRESETS = PRESETS.filter((p) => p.curated);
-export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Print", "Text", "Film", "Grade", "Glitch"];
+export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Print", "Text", "Paint", "Film", "Grade", "Glitch", "Scene"];

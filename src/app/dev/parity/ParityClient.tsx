@@ -17,6 +17,9 @@ const BENCH_FRAMES = 60;
 interface TestConfig {
   label: string;
   stack: { type: EffectType; params?: Record<string, ParamValue> }[];
+  /** fixed render time for animated effects — pick a value that lands mid-step,
+   * not on a discrete boundary. Omitted = engine clock at t≈0 (static). */
+  time?: number;
 }
 
 const TEST_CONFIGS: TestConfig[] = [
@@ -29,20 +32,183 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "halftone", params: {} }],
   },
   {
+    label: "Halftone · CMYK",
+    stack: [{ type: "halftone", params: { mode: "cmyk" } }],
+  },
+  {
+    label: "Halftone · square+stagger",
+    stack: [{ type: "halftone", params: { dotShape: "square", stagger: true, angle: 22, contrast: 1.3 } }],
+  },
+  {
+    label: "Halftone · gooey+overflow",
+    stack: [{ type: "halftone", params: { gooey: 0.8, overflow: 0.5 } }],
+  },
+  {
+    label: "Receipt",
+    stack: [{ type: "receipt" }],
+  },
+  {
+    label: "Fluted glass",
+    stack: [{ type: "flutedGlass", params: { amount: 0.6 } }],
+  },
+  {
+    label: "LED panel",
+    stack: [{ type: "ledPanel" }],
+  },
+  {
+    label: "Crochet",
+    stack: [{ type: "crochet" }],
+  },
+  {
     label: "Dither · Bayer 4x4",
     stack: [{ type: "dither", params: { type: "bayer4" } }],
+  },
+  {
+    label: "Dither · blue noise",
+    stack: [{ type: "dither", params: { type: "blueNoise" } }],
+  },
+  {
+    // Golden-ratio rank rotation — offset computed in TS on both sides, so
+    // this must stay in the same bit-exact tier as static blue noise.
+    label: "Dither · blue noise animated",
+    stack: [{ type: "dither", params: { type: "blueNoise", animate: true } }],
+    time: 1.7,
+  },
+  {
+    // Progressive depixelation — block size from the shared TS helper; time
+    // lands mid-step (not on a floor boundary). Same tier as static pixelate.
+    label: "Pixelate · animated",
+    stack: [{ type: "pixelate", params: { animate: true, speed: 1, steps: 5 } }],
+    time: 2.37,
   },
   {
     label: "Dither · Floyd-Steinberg",
     stack: [{ type: "dither", params: { type: "floydSteinberg" } }],
   },
   {
+    // quality must be explicit — the catalog default is "smooth", so params:{}
+    // silently tested the smooth path twice (pre-existing label bug).
+    label: "Kuwahara · fast",
+    stack: [{ type: "kuwahara", params: { quality: "fast" } }],
+  },
+  {
     label: "Kuwahara · smooth",
     stack: [{ type: "kuwahara", params: { quality: "smooth" } }],
   },
   {
+    // Statistical tier (NOT bit-exact like fast/smooth): tensor smoothing +
+    // f32/f64 trig divergence can pick different stroke orientations at
+    // near-isotropic pixels. Targets: meanDelta <= 1.5, pctDiffPixels <= 5%.
+    label: "Kuwahara · anisotropic",
+    stack: [{ type: "kuwahara", params: { quality: "anisotropic" } }],
+  },
+  {
+    label: "Kuwahara · anisotropic strong",
+    stack: [{ type: "kuwahara", params: { quality: "anisotropic", radius: 8, anisotropy: 2, sharpness: 12 } }],
+  },
+  {
     label: "Gradient map",
     stack: [{ type: "gradientMap", params: {} }],
+  },
+  {
+    label: "Gradient map · 4 stops",
+    stack: [
+      {
+        type: "gradientMap",
+        params: {
+          stops: [
+            { t: 0, color: "#0a0a14" },
+            { t: 0.35, color: "#7a2848" },
+            { t: 0.7, color: "#e8845a" },
+            { t: 1, color: "#f7ecd9" },
+          ],
+        },
+      },
+    ],
+  },
+  {
+    label: "CRT curvature",
+    stack: [{ type: "crtCurvature", params: {} }],
+  },
+  {
+    label: "Grain (stochastic — stats only)",
+    stack: [{ type: "grain", params: {} }],
+  },
+  {
+    label: "Line art · outline",
+    stack: [{ type: "lineArt", params: {} }],
+  },
+  {
+    label: "Line art · ink+hatch",
+    stack: [{ type: "lineArt", params: { mode: "ink", hatchSpacing: 6 } }],
+  },
+  {
+    label: "Line art · XDoG",
+    stack: [{ type: "lineArt", params: { mode: "xdog" } }],
+  },
+  {
+    label: "Blur · gaussian",
+    stack: [{ type: "blur", params: { radius: 8 } }],
+  },
+  {
+    label: "Blur · directional",
+    stack: [{ type: "blur", params: { radius: 12, mode: "directional", angle: 30 } }],
+  },
+  {
+    label: "Blur · radial",
+    stack: [{ type: "blur", params: { radius: 12, mode: "radial" } }],
+  },
+  {
+    label: "Blur · tilt shift",
+    stack: [{ type: "blur", params: { radius: 10, mode: "tiltShift" } }],
+  },
+  {
+    label: "Bloom",
+    stack: [{ type: "bloom", params: {} }],
+  },
+  {
+    // ACCEPTED DIVERGENCE (stats only, grain precedent): GL runs the dual-
+    // filter mip chain, CPU maps dual → gaussian at radius*1.4. Numbers are
+    // recorded for drift awareness, no hard target.
+    label: "Bloom · dual (stats only)",
+    stack: [{ type: "bloom", params: { quality: "dual" } }],
+  },
+  {
+    // Statistical tier: the only cross-engine divergence is rare f32/f64
+    // floor ties on ray sample positions (one bright texel on one of N
+    // samples). Targets: meanDelta < 0.5, pctDiffPixels < 1.5%.
+    label: "Light rays",
+    stack: [{ type: "lightRays", params: {} }],
+  },
+  {
+    label: "Light rays · long/low-decay",
+    stack: [{ type: "lightRays", params: { density: 1, decay: 0.9, samples: 64, y: 10 } }],
+  },
+  {
+    label: "Chromatic · radial x8",
+    stack: [{ type: "chromatic", params: { samples: 8, amount: 6 } }],
+  },
+  {
+    label: "Chromatic · high quality",
+    stack: [{ type: "chromatic", params: { quality: "high", samples: 4, amount: 6 } }],
+  },
+  {
+    // background:"paper" — ascii's catalog default is "blurred", which is a
+    // shouldBridge param (would silently test the CPU bridge, not the atlas).
+    label: "ASCII (atlas)",
+    stack: [{ type: "ascii", params: { background: "paper" } }],
+  },
+  {
+    label: "ASCII (atlas, over photo)",
+    stack: [{ type: "ascii", params: { background: "original", colorMode: "source" } }],
+  },
+  {
+    label: "Glyph dots (atlas)",
+    stack: [{ type: "glyphDots" }],
+  },
+  {
+    label: "Crosshatch (atlas, shape mode)",
+    stack: [{ type: "crosshatch" }],
   },
 ];
 
@@ -79,6 +245,80 @@ interface ParityResult {
   maxDelta: number;
   meanDelta: number;
   pctDiffPixels: number;
+}
+
+function minAlpha(id: ImageData): number {
+  let min = 255;
+  const d = id.data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < min) min = d[i];
+  return min;
+}
+
+// Automation hook: window.__parity lets a driven browser run any config and
+// read structured results without clicking through the UI. Dev-only page, so
+// the global is deliberate. minAlpha catches opacity bugs (e.g. the CPU blur
+// edge-alpha quirk) that rgb-only inspection misses.
+let hookImage: HTMLImageElement | null = null;
+async function runParityByLabel(label: string) {
+  const test = TEST_CONFIGS.find((t) => t.label === label);
+  if (!test) throw new Error(`unknown config: ${label}`);
+  hookImage ??= await loadTestImage();
+  const config = buildConfig(test);
+  const glCanvas = document.createElement("canvas");
+  const cpuCanvas = document.createElement("canvas");
+  renderOnce("gl", glCanvas, config, DIMS, hookImage, test.time);
+  renderOnce("cpu", cpuCanvas, config, DIMS, hookImage, test.time);
+  const glData = glCanvas.getContext("2d")!.getImageData(0, 0, DIMS.W, DIMS.H);
+  const cpuData = cpuCanvas.getContext("2d")!.getImageData(0, 0, DIMS.W, DIMS.H);
+  return { ...diffImageData(glData, cpuData), minAlphaGl: minAlpha(glData), minAlphaCpu: minAlpha(cpuData) };
+}
+async function benchByLabel(label: string) {
+  const test = TEST_CONFIGS.find((t) => t.label === label);
+  if (!test) throw new Error(`unknown config: ${label}`);
+  hookImage ??= await loadTestImage();
+  const config = buildConfig(test);
+  return { gl: benchEngine("gl", config, DIMS, hookImage), cpu: benchEngine("cpu", config, DIMS, hookImage) };
+}
+// Render a pattern source (no effects) into a visible probe canvas so a driven
+// browser can screenshot it — pattern types have no image-diff parity bar
+// (both engines share the same CPU draw path for the base), they need eyeballs.
+function showPattern(pattern: Record<string, unknown>) {
+  const cfg = makeDefaultConfig();
+  cfg.source = {
+    mode: "pattern",
+    imageId: null,
+    solidColor: "#cdd9e0",
+    pattern: pattern as unknown as NonNullable<BgConfig["source"]["pattern"]>,
+  };
+  cfg.stack = [];
+  let canvas = document.getElementById("pattern-probe") as HTMLCanvasElement | null;
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.id = "pattern-probe";
+    canvas.style.position = "fixed";
+    canvas.style.top = "0";
+    canvas.style.left = "0";
+    canvas.style.zIndex = "9999";
+    document.body.appendChild(canvas);
+  }
+  const engine = createEngine("cpu");
+  try {
+    engine.setSource({ kind: "pattern", pattern: cfg.source.pattern! });
+    engine.render(canvas, cfg, DIMS);
+  } finally {
+    engine.dispose();
+  }
+  return "rendered";
+}
+
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__parity = {
+    labels: () => TEST_CONFIGS.map((t) => t.label),
+    hasWebGL2: () => hasRealWebGL2(),
+    run: runParityByLabel,
+    bench: benchByLabel,
+    showPattern,
+  };
 }
 
 function diffImageData(a: ImageData, b: ImageData): ParityResult {
@@ -191,8 +431,8 @@ export default function ParityClient() {
       const cpuCanvas = cpuCanvasRef.current;
       if (!glCanvas || !cpuCanvas) throw new Error("canvas refs not mounted");
 
-      renderOnce("gl", glCanvas, config, DIMS, img);
-      renderOnce("cpu", cpuCanvas, config, DIMS, img);
+      renderOnce("gl", glCanvas, config, DIMS, img, selected.time);
+      renderOnce("cpu", cpuCanvas, config, DIMS, img, selected.time);
 
       // Both engines draw into `target` via an internal drawImage/2D composite
       // (the GL engine keeps its own offscreen WebGL canvas and blits from it),

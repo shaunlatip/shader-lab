@@ -128,6 +128,41 @@ export class GLContext {
     return { tex, fbo, w, h };
   }
 
+  /** F4: sampler-only asset texture (no FBO) from raw single-channel bytes —
+   * NEAREST/REPEAT, read with texelFetch in passes. Used for threshold
+   * matrices / atlases that shaders sample but never render into. */
+  createAssetTextureR8(w: number, h: number, data: Uint8Array): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, w, h, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    return tex;
+  }
+
+  /** F4 (dynamic): sampler-only RGBA texture from a canvas/image source — NEAREST/
+   * NEAREST, CLAMP_TO_EDGE both axes, no FBO. Mirrors createAssetTextureR8's
+   * sampler-only pattern but for RGBA8 sources (glyph atlases). Deliberately NO
+   * FLIP_Y: the atlas is authored and addressed in top-left-origin UV space —
+   * the sampling pass flips its own y addressing (1.0 - v_uv.y), same convention
+   * every pass in shaders.ts uses to read u_tex in canvas px space. */
+  createAssetTextureRGBA(src: TexImageSource): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
   /** Upload an external source (image/video/canvas) into a texture, FLIP_Y so it's upright. */
   uploadExternal(target: GLTexture, src: TexImageSource) {
     const gl = this.gl;
@@ -172,6 +207,20 @@ export class GLContext {
     gl.bindVertexArray(this.quad);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
+  }
+
+  /** Synchronous RGBA8 readback of a rendered texture. `out` (when given and
+   * big enough) is reused to avoid per-frame allocation — this runs per video
+   * frame for the glyph autoContrast reduction. Keep read targets small: the
+   * readback stalls the pipeline. */
+  readTexture(src: GLTexture, out?: Uint8Array): Uint8Array {
+    const gl = this.gl;
+    const size = src.w * src.h * 4;
+    const buf = out && out.length >= size ? out : new Uint8Array(size);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, src.fbo);
+    gl.readPixels(0, 0, src.w, src.h, gl.RGBA, gl.UNSIGNED_BYTE, buf.subarray(0, size));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return buf;
   }
 
   /** Blit a texture to the default framebuffer (so the canvas shows it upright). */

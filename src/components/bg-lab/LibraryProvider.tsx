@@ -11,7 +11,7 @@ import {
   type Draft,
   type SavedEffect,
 } from "@/lib/bg-lab/library";
-import type { Effect } from "@/lib/bg-lab/types";
+import type { Effect, SourceState } from "@/lib/bg-lab/types";
 import { useBgLab } from "./BgLabProvider";
 
 interface LibCtx {
@@ -24,8 +24,9 @@ interface LibCtx {
   saveStack: (name: string) => void;
   /** Save an arbitrary stack as a named effect-set (used by the AI flow). */
   saveStackFrom: (name: string, stack: Effect[]) => void;
-  /** Load a saved/built-in stack into the editor. */
-  applyStack: (stack: Effect[]) => void;
+  /** Load a saved/built-in stack into the editor. Generative-source builtins
+   * pass a `source` patch that replaces the editor source too. */
+  applyStack: (stack: Effect[], source?: Partial<SourceState>) => void;
   removeSaved: (id: string) => void;
   /** The draft the editor is currently bound to (updates write to it). */
   activeDraftId: string | null;
@@ -83,7 +84,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setSaved((s) => [{ id: nanoid(8), name: name.trim() || "Untitled set", stack: reIdStack(config.stack) }, ...s]),
       saveStackFrom: (name, stack) =>
         setSaved((s) => [{ id: nanoid(8), name: name.trim() || "AI set", stack: reIdStack(stack) }, ...s]),
-      applyStack: (stack) => dispatch({ t: "setStack", stack: reIdStack(stack) }),
+      applyStack: (stack, source) => {
+        if (source) dispatch({ t: "setSource", patch: source });
+        dispatch({ t: "setStack", stack: reIdStack(stack) });
+      },
       removeSaved: (id) => setSaved((s) => s.filter((x) => x.id !== id)),
       activeDraftId,
       saveDraft: (name) => {
