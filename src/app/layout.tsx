@@ -39,10 +39,15 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         {/* Time-of-day auto theme (ported from the portfolio): seed
-            localStorage["theme"] (next-themes' storage key) before next-themes'
-            own inline script runs, so the first paint is already correct —
-            dark 18:00–05:00 local, light otherwise. A manual toggle sets
-            "theme-manual" and this script becomes a no-op. */}
+            localStorage["theme"] (next-themes' storage key) before
+            next-themes' own body-start script parses, so the first paint is
+            already correct — dark 18:00–05:00 local, light otherwise. A
+            manual toggle sets "theme-manual" and this becomes a no-op.
+            React 19's dev build logs a validation note for inline scripts
+            rendered in components; the tag executes at HTML parse time
+            regardless (that's the whole point) and prod consoles are clean.
+            next/script beforeInteractive was tried and produces harder
+            errors under React 19 (script as a child of <html>). */}
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){try{if(localStorage.getItem('theme-manual')==='1')return;var h=new Date().getHours();localStorage.setItem('theme',(h>=18||h<5)?'dark':'light');}catch(e){}})();`,

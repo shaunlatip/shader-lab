@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored third-party (Amplo color picker via shadcn registry) — keep
+    // upstream-diffable, don't hold it to local lint rules.
+    "src/components/ui/color-picker/**",
   ]),
 ]);
 
