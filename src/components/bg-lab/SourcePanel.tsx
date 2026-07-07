@@ -74,20 +74,21 @@ export function SourcePanel() {
 
       {source.mode === "image" && (
         <>
-          <CollapsibleSection
-            title="Gallery"
-            defaultOpen
-            action={
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                className="inline-flex items-center gap-1 rounded text-[11px] text-text-secondary transition-colors hover:text-text-primary"
-              >
-                <Upload className="h-3 w-3" /> Upload
-              </button>
-            }
+          {/* Your image first: this is a tool for the user's own assets.
+              Starters exist so a first render is one click away. */}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex h-9 items-center justify-center gap-2 rounded-control border border-border-default bg-canvas text-[13px] text-text-primary shadow-xs transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover"
           >
-            <div className="grid grid-cols-4 gap-1.5">
+            <Upload className="h-3.5 w-3.5" /> Upload image
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => onUpload(e, "image")} />
+
+          <PexelsSearch kind="photo" />
+
+          <CollapsibleSection title="Starters" defaultOpen>
+            <div className="grid grid-cols-3 gap-1.5">
               {GALLERY.map((g) => (
                 <button
                   key={g.id}
@@ -112,8 +113,6 @@ export function SourcePanel() {
               ))}
             </div>
           </CollapsibleSection>
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => onUpload(e, "image")} />
-          <PexelsSearch kind="photo" />
         </>
       )}
 

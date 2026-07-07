@@ -17,32 +17,42 @@ const mk = (id: string, label: string, ext = "png"): GalleryImage => ({
   url: `${IMG_BASE}/${id}.${ext}`,
 });
 
-// Reuse the existing curated background set (served statically).
+// Starters: a small curated set chosen to highlight effects across the range
+// that matters — high-contrast landmark, tonal gradient, saturated detail,
+// soft low-contrast, texture, organic scene. Uploads and Pexels are the
+// primary sources; these exist so a first render is one click away.
 export const GALLERY: GalleryImage[] = [
+  mk("mon-haystack", "Haystack"),
   mk("mon-sunrise", "Sunrise"),
   mk("mon-poppies", "Poppies"),
-  mk("mon-lilies", "Lilies"),
-  mk("mon-clouds", "Sky"),
-  mk("mon-wisteria", "Wisteria"),
-  mk("mon-haystack", "Haystack"),
-  mk("photo-ridges", "Ridges"),
-  mk("photo-water", "Water"),
-  mk("photo-dunes", "Dunes"),
   mk("photo-fog", "Fog"),
-  mk("photo-clouds", "Cloud"),
-  mk("env-dawn", "Dawn"),
-  mk("env-ridges", "Ridges II"),
-  mk("env-water", "Water II"),
-  mk("env-clouds", "Cloud II"),
-  mk("env-dune", "Dune"),
-  mk("atmo-dusk", "Dusk", "jpg"),
+  mk("photo-dunes", "Dunes"),
   mk("atmo-charles", "Charles", "jpg"),
-  mk("atmo-foliage", "Foliage", "jpg"),
 ];
+
+// Drafts and saved configs may reference gallery images that were removed in
+// the starters cull — resolve them to the nearest surviving starter so an old
+// draft never 404s its source.
+const LEGACY_IMAGE_ALIASES: Record<string, string> = {
+  "mon-lilies": "mon-poppies",
+  "mon-clouds": "photo-fog",
+  "mon-wisteria": "mon-poppies",
+  "photo-ridges": "photo-dunes",
+  "photo-water": "photo-fog",
+  "photo-clouds": "photo-fog",
+  "env-dawn": "mon-sunrise",
+  "env-ridges": "photo-dunes",
+  "env-water": "photo-fog",
+  "env-clouds": "photo-fog",
+  "env-dune": "photo-dunes",
+  "atmo-dusk": "mon-sunrise",
+  "atmo-foliage": "atmo-charles",
+};
 
 export function galleryUrl(id: string | null): string | null {
   if (!id) return null;
-  const g = GALLERY.find((x) => x.id === id);
+  const resolved = LEGACY_IMAGE_ALIASES[id] ?? id;
+  const g = GALLERY.find((x) => x.id === resolved);
   return g ? g.url : null;
 }
 
