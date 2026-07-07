@@ -4,7 +4,7 @@ import { usePanelState } from "@/hooks/usePanelState";
 import { BgLabProvider } from "./BgLabProvider";
 import { SourceProvider } from "./SourceProvider";
 import { LibraryProvider } from "./LibraryProvider";
-import { CanvasHeader } from "./CanvasHeader";
+import { LabHeader } from "./LabHeader";
 import { LeftPanel } from "./LeftPanel";
 import { RightPanel } from "./RightPanel";
 import { PanelResizer } from "./PanelResizer";
@@ -15,35 +15,42 @@ function LabShell() {
   const right = usePanelState("right");
 
   return (
-    <div className="lab-chrome font-lab flex h-[100dvh] overflow-hidden bg-canvas text-text-primary antialiased">
-      <LeftPanel width={left.width} collapsed={left.collapsed} onToggle={left.toggleCollapsed} />
-      {!left.collapsed && (
-        <PanelResizer
-          side="left"
-          width={left.width}
-          min={left.min}
-          max={left.max}
-          collapsed={left.collapsed}
-          onWidth={left.setWidth}
-          onToggle={left.toggleCollapsed}
-        />
-      )}
-      <main className="flex min-w-0 flex-1 flex-col">
-        <CanvasHeader />
-        <Stage />
-      </main>
-      {!right.collapsed && (
-        <PanelResizer
-          side="right"
-          width={right.width}
-          min={right.min}
-          max={right.max}
-          collapsed={right.collapsed}
-          onWidth={right.setWidth}
-          onToggle={right.toggleCollapsed}
-        />
-      )}
-      <RightPanel width={right.width} collapsed={right.collapsed} onToggle={right.toggleCollapsed} />
+    <div className="lab-chrome font-lab flex h-[100dvh] flex-col overflow-hidden bg-canvas text-text-primary antialiased">
+      <LabHeader
+        leftCollapsed={left.collapsed}
+        rightCollapsed={right.collapsed}
+        onToggleLeft={left.toggleCollapsed}
+        onToggleRight={right.toggleCollapsed}
+      />
+      <div className="flex min-h-0 flex-1">
+        <LeftPanel width={left.width} collapsed={left.collapsed} />
+        {!left.collapsed && (
+          <PanelResizer
+            side="left"
+            width={left.width}
+            min={left.min}
+            max={left.max}
+            collapsed={left.collapsed}
+            onWidth={left.setWidth}
+            onToggle={left.toggleCollapsed}
+          />
+        )}
+        <main className="flex min-w-0 flex-1 flex-col">
+          <Stage />
+        </main>
+        {!right.collapsed && (
+          <PanelResizer
+            side="right"
+            width={right.width}
+            min={right.min}
+            max={right.max}
+            collapsed={right.collapsed}
+            onWidth={right.setWidth}
+            onToggle={right.toggleCollapsed}
+          />
+        )}
+        <RightPanel width={right.width} collapsed={right.collapsed} />
+      </div>
     </div>
   );
 }

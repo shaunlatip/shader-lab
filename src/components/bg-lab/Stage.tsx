@@ -19,7 +19,9 @@ function cssFit(boxW: number, boxH: number, ratio: number) {
     h = boxH - PAD;
     w = h * ratio;
   }
-  return { w: Math.max(1, w), h: Math.max(1, h) };
+  // Integer CSS size: fractional boxes antialias the bitmap edge and let the
+  // element background peek through as a hairline fringe around the artwork.
+  return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) };
 }
 
 export function Stage() {
@@ -53,6 +55,11 @@ export function Stage() {
 
   const ratio = aspectRatio(config.output.aspect);
   const fit = cssFit(box.w, box.h, ratio);
+  // Checker only when the render can actually be transparent — as a resting
+  // background it bleeds a light fringe around opaque artwork edges.
+  const canBeTransparent = config.stack.some(
+    (e) => e.enabled && e.params?.background === "transparent",
+  );
 
   // release the GL context (and CPU resources) when the lab unmounts —
   // browsers cap live WebGL contexts, so leaking one per mount eventually kills
@@ -221,7 +228,10 @@ export function Stage() {
             height: fit.h,
             transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
           }}
-          className="checker-transparency rounded-[2px] shadow-5 ring-1 ring-black/[0.06] will-change-transform"
+          className={cn(
+            "rounded-[2px] shadow-5 ring-1 ring-black/[0.06] will-change-transform",
+            canBeTransparent && "checker-transparency",
+          )}
         />
         {loading && (
           <span className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-border-default bg-canvas/90 px-2 py-0.5 text-[11px] text-text-secondary shadow-2 backdrop-blur">

@@ -459,12 +459,14 @@ html:has(#intro-root[data-phase="reveal"]) {
   --radius-frame: 12px;
   --radius-chip: 9999px;
 
-  /* --- Box shadows (1–5, each with two layers for depth) --- */
-  --shadow-1: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.24);
-  --shadow-2: 0 3px 6px rgba(0,0,0,.15), 0 2px 4px rgba(0,0,0,.12);
-  --shadow-3: 0 10px 20px rgba(0,0,0,.15), 0 3px 6px rgba(0,0,0,.10);
-  --shadow-4: 0 15px 25px rgba(0,0,0,.15), 0 5px 10px rgba(0,0,0,.05);
-  --shadow-5: 0 20px 40px rgba(0,0,0,.20), 0 8px 16px rgba(0,0,0,.08);
+  /* --- Box shadows (1–5, two-part: ambient + direct, Refactoring UI) ---
+   * Distinct at low elevation, near-invisible at high — the higher a surface
+   * floats, the softer and larger its shadow, never darker/harsher. */
+  --shadow-1: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.10);
+  --shadow-2: 0 3px 6px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.06);
+  --shadow-3: 0 10px 20px rgba(0,0,0,.08), 0 3px 6px rgba(0,0,0,.05);
+  --shadow-4: 0 15px 25px rgba(0,0,0,.08), 0 5px 10px rgba(0,0,0,.03);
+  --shadow-5: 0 20px 40px rgba(0,0,0,.10), 0 8px 16px rgba(0,0,0,.04);
 }
 
 /* --- Theme color-scheme + per-theme semantic overrides ---
