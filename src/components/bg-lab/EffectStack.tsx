@@ -52,7 +52,7 @@ export function EffectStack() {
         </SortableContext>
       </DndContext>
       <p className="px-0.5 text-[11px] leading-snug text-text-secondary">
-        Applied top → bottom. Drag the grip to reorder — order changes the result.
+        Applied top → bottom. Drag to reorder.
       </p>
     </div>
   );

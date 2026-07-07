@@ -50,9 +50,15 @@ export function EffectCard({ effect }: { effect: Effect }) {
       )}
     >
       <div className="flex items-center gap-1 px-1.5 py-1.5">
+        {/* Secondary affordances (grip, remove) reveal on hover or keyboard
+            focus — the resting row is just chevron + name + switch. They stay
+            in the DOM and tab order throughout. */}
         <button
           type="button"
-          className="cursor-grab touch-none rounded p-0.5 text-text-secondary transition-colors duration-150 hover:text-text-primary active:cursor-grabbing"
+          className={cn(
+            "cursor-grab touch-none rounded p-0.5 text-text-secondary transition-[color,opacity] duration-150 hover:text-text-primary focus-visible:opacity-100 active:cursor-grabbing",
+            isDragging ? "opacity-100" : "opacity-0 group-hover/card:opacity-100 group-focus-within/card:opacity-100",
+          )}
           aria-label="Drag to reorder"
           {...attributes}
           {...listeners}
@@ -92,7 +98,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
           size="icon-xs"
           onClick={() => dispatch({ t: "remove", id: effect.id })}
           aria-label="Remove effect"
-          className="text-text-secondary transition-[transform,color] duration-150 hover:text-text-primary active:scale-90"
+          className="text-text-secondary opacity-0 transition-[transform,color,opacity] duration-150 group-focus-within/card:opacity-100 group-hover/card:opacity-100 hover:text-text-primary focus-visible:opacity-100 active:scale-90"
         >
           <X className="h-4 w-4" />
         </Button>
