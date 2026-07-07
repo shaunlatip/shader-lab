@@ -72,14 +72,18 @@ const PEXELS_REF: Record<string, string> = {
   warp: "26547201", // abstract window grid
   "pixel-grain": "19315391", // orange Moskvitch
   "pixel-dots": "31793882", // meerkat on a rock
-  "pixel-diamonds": "33729670", // grapes in a blue bowl
+  "pixel-diamonds": "33729670.png", // grapes in a blue bowl
   "mosaic-tiles": "17594273", // geometric facade
   lego: "10821202", // colorful fruit bowls
   crt: "35069718", // moody neon sign
 };
 
-const pexelsUrl = (id: string) =>
-  `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940`;
+// Ref values are "<id>" or "<id>.<ext>" — most photos are .jpeg on the CDN
+// but not all (33729670 is .png), and a wrong extension 404s.
+const pexelsUrl = (ref: string) => {
+  const [id, ext = "jpeg"] = ref.split(".");
+  return `https://images.pexels.com/photos/${id}/pexels-photo-${id}.${ext}?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940`;
+};
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -120,8 +124,10 @@ export default function ThumbsClient() {
             config.source = { mode: "pattern", imageId: null, solidColor: "#cdd9e0", pattern: preset.source.pattern };
             engine.setSource({ kind: "pattern", pattern: preset.source.pattern ?? DEFAULT_PATTERN });
           } else {
+            // No silent fallback for mapped refs — a CDN miss must surface as
+            // an ✗ row, not quietly render the shared reference image.
             const refId = PEXELS_REF[preset.slug];
-            const img = refId ? await loadImage(pexelsUrl(refId)).catch(() => fallback) : fallback;
+            const img = refId ? await loadImage(pexelsUrl(refId)) : fallback;
             engine.setSource({ kind: "image", image: img });
           }
           engine.render(canvas, config, { W, H });
