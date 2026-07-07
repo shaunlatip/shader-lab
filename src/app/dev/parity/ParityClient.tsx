@@ -193,10 +193,23 @@ const TEST_CONFIGS: TestConfig[] = [
     stack: [{ type: "chromatic", params: { quality: "high", samples: 4, amount: 6 } }],
   },
   {
-    // background:"paper" — ascii's catalog default is "blurred", which is a
-    // shouldBridge param (would silently test the CPU bridge, not the atlas).
+    // background:"paper" pinned — blurred/transparent are shouldBridge params
+    // (would silently test the CPU bridge, not the atlas). autoContrast pinned
+    // per the Kuwahara·fast lesson: catalog default is true, so this exercises
+    // the GL pre-pass percentile stretch.
     label: "ASCII (atlas)",
-    stack: [{ type: "ascii", params: { background: "paper" } }],
+    stack: [{ type: "ascii", params: { background: "paper", autoContrast: true } }],
+  },
+  {
+    label: "ASCII (atlas, no autoContrast)",
+    stack: [{ type: "ascii", params: { background: "paper", autoContrast: false } }],
+  },
+  {
+    // perf-era params (ink mode, cell 12): isolates the rasterization tier from
+    // the colorMode:"source" tier (per-cell avg color = box-vs-Skia divergence
+    // on every glyph pixel, which dominates the source-mode stats).
+    label: "ASCII (atlas, ink cell12)",
+    stack: [{ type: "ascii", params: { background: "paper", colorMode: "ink", cell: 12, autoContrast: false } }],
   },
   {
     label: "ASCII (atlas, over photo)",
@@ -205,6 +218,10 @@ const TEST_CONFIGS: TestConfig[] = [
   {
     label: "Glyph dots (atlas)",
     stack: [{ type: "glyphDots" }],
+  },
+  {
+    label: "Glyph dots (atlas, no autoContrast)",
+    stack: [{ type: "glyphDots", params: { autoContrast: false } }],
   },
   {
     label: "Crosshatch (atlas, shape mode)",
