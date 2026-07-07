@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
-import { Crop, Sparkles, Upload } from "lucide-react";
+import { toast } from "sonner";
+import { Crop, Shuffle, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GALLERY, inspireFromPexels } from "@/lib/bg-lab/presets";
+import { GALLERY, randomGalleryId, randomPexelsId } from "@/lib/bg-lab/presets";
 import { useBgLab } from "./BgLabProvider";
 import { PexelsSearch } from "./PexelsSearch";
 import { SolidColorPanel } from "./SolidColorPanel";
@@ -15,7 +16,7 @@ export function SourcePanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
   const [cropOpen, setCropOpen] = useState(false);
-  const [inspiring, setInspiring] = useState(false);
+  const [randomizing, setRandomizing] = useState(false);
   const { source } = config;
   const hasMedia = (source.mode === "image" || source.mode === "video") && !!source.imageId;
   // pattern mode never shows crop UI
@@ -26,6 +27,26 @@ export function SourcePanel() {
     if (!f) return;
     const url = URL.createObjectURL(f);
     dispatch({ t: "setSource", patch: { mode, imageId: url } });
+  }
+
+  // Scoped randomize: only swaps the source for the active tab (the stack is
+  // untouched — random preset lives in the Presets section, random color /
+  // pattern in their own panels).
+  async function randomizeSource() {
+    const mode = source.mode as "image" | "video";
+    setRandomizing(true);
+    try {
+      const id = await randomPexelsId(mode === "video" ? "video" : "photo");
+      if (id) {
+        dispatch({ t: "setSource", patch: { mode, imageId: id } });
+      } else if (mode === "image") {
+        dispatch({ t: "setSource", patch: { mode, imageId: randomGalleryId() } }); // offline fallback
+      } else {
+        toast.error("Couldn't fetch a random video", { description: "Pexels search isn't available right now." });
+      }
+    } finally {
+      setRandomizing(false);
+    }
   }
 
   return (
@@ -50,34 +71,28 @@ export function SourcePanel() {
         </TabsList>
       </Tabs>
 
-      <div className="flex gap-1.5">
-        <button
-          type="button"
-          disabled={inspiring}
-          onClick={async () => {
-            // random Pexels photo + curated random stack; falls back to the
-            // gallery inside inspireFromPexels when the API is unavailable
-            setInspiring(true);
-            try {
-              dispatch({ t: "replace", config: await inspireFromPexels() });
-            } finally {
-              setInspiring(false);
-            }
-          }}
-          className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px] disabled:opacity-60")}
-        >
-          <Sparkles className="h-3.5 w-3.5" /> {inspiring ? "Inspiring…" : "Inspire me"}
-        </button>
-        {hasMedia && (
+      {(source.mode === "image" || source.mode === "video") && (
+        <div className="flex gap-1.5">
           <button
             type="button"
-            onClick={() => setCropOpen(true)}
-            className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px]")}
+            disabled={randomizing}
+            onClick={randomizeSource}
+            className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px] disabled:opacity-60")}
           >
-            <Crop className="h-3.5 w-3.5" /> Crop{transformed ? " ·" : ""}
+            <Shuffle className="h-3.5 w-3.5" />
+            {randomizing ? "Rolling…" : source.mode === "video" ? "Random video" : "Random image"}
           </button>
-        )}
-      </div>
+          {hasMedia && (
+            <button
+              type="button"
+              onClick={() => setCropOpen(true)}
+              className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px]")}
+            >
+              <Crop className="h-3.5 w-3.5" /> Crop{transformed ? " ·" : ""}
+            </button>
+          )}
+        </div>
+      )}
       {cropOpen && <CropRotate onClose={() => setCropOpen(false)} />}
 
       {source.mode === "solid" && <SolidColorPanel />}

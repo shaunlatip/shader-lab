@@ -1,8 +1,9 @@
 import { useMemo } from "react";
+import { Shuffle } from "lucide-react";
 import { ColorPicker, parseColor } from "@/components/ui/color-picker/color-picker";
 import { useSwatches } from "@/hooks/useSwatches";
 import { useBgLab } from "./BgLabProvider";
-import { SectionHeader } from "./panel";
+import { IconTip, SectionHeader } from "./panel";
 
 // Curated background swatches — neutrals across the value range plus a few
 // useful tints (paper, cool, warm, navy).
@@ -25,9 +26,39 @@ export function SolidColorPanel() {
 
   const parsed = useMemo(() => parseColor(color) ?? parseColor("#ffffff")!, [color]);
 
+  // Scoped randomize: an HSL roll biased away from neon (moderate saturation,
+  // wide lightness range) so random backgrounds stay usable.
+  function randomColor() {
+    const h = Math.floor(Math.random() * 360);
+    const s = 15 + Math.random() * 55;
+    const l = 20 + Math.random() * 70;
+    const toHex = (v: number) => Math.round(v).toString(16).padStart(2, "0");
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      const a = (s / 100) * Math.min(l / 100, 1 - l / 100);
+      return (l / 100 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255;
+    };
+    set(`#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`);
+  }
+
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeader>Color</SectionHeader>
+      <SectionHeader
+        action={
+          <IconTip label="Random color">
+            <button
+              type="button"
+              onClick={randomColor}
+              aria-label="Random color"
+              className="grid h-6 w-6 place-items-center rounded-control text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              <Shuffle className="h-3.5 w-3.5" />
+            </button>
+          </IconTip>
+        }
+      >
+        Color
+      </SectionHeader>
 
       <ColorPicker.Root
         value={parsed}

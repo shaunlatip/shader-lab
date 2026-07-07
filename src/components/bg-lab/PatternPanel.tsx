@@ -1,11 +1,12 @@
 import { useEffect } from "react";
+import { Shuffle } from "lucide-react";
 import type { ControlSpec } from "@/lib/bg-lab/catalog";
 import type { PatternState, PatternType } from "@/lib/bg-lab/types";
 import { DEFAULT_PATTERN } from "@/lib/bg-lab/patternCatalog";
 import { cn } from "@/lib/utils";
 import { useBgLab } from "./BgLabProvider";
 import { ControlRow } from "./controls/ControlRow";
-import { SectionHeader } from "./panel";
+import { IconTip, SectionHeader } from "./panel";
 
 const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
   { value: "dotGrid", label: "Dot grid" },
@@ -109,6 +110,15 @@ export function PatternPanel() {
   function applyPreset(patch: Partial<PatternState>) {
     dispatch({ t: "setSource", patch: { pattern: { ...pattern, ...patch } } });
   }
+  // Scoped randomize: pick a random type; when it has curated starting points,
+  // land on one of those (random defaults on a generative field are usually
+  // mud — the chips are known-good).
+  function randomize() {
+    const type = PATTERN_TYPE_OPTIONS[Math.floor(Math.random() * PATTERN_TYPE_OPTIONS.length)].value;
+    const chips = PATTERN_PRESETS[type];
+    const patch = chips ? chips[Math.floor(Math.random() * chips.length)].patch : {};
+    dispatch({ t: "setSource", patch: { pattern: { ...pattern, ...patch, type } } });
+  }
 
   const typeSpec: ControlSpec = {
     kind: "select",
@@ -134,7 +144,22 @@ export function PatternPanel() {
 
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeader>Pattern</SectionHeader>
+      <SectionHeader
+        action={
+          <IconTip label="Random pattern">
+            <button
+              type="button"
+              onClick={randomize}
+              aria-label="Random pattern"
+              className="grid h-6 w-6 place-items-center rounded-control text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              <Shuffle className="h-3.5 w-3.5" />
+            </button>
+          </IconTip>
+        }
+      >
+        Pattern
+      </SectionHeader>
       <div className="flex flex-col gap-2.5">
         {row(typeSpec)}
         {presets && (

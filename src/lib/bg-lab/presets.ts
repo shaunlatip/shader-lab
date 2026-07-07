@@ -1,7 +1,7 @@
 // BG Lab — curated gallery, seed search tags, and the default config / presets.
 
 import { nanoid } from "nanoid";
-import { defaultParams, EFFECT_CATALOG } from "./catalog";
+import { defaultParams } from "./catalog";
 import type { BgConfig, Effect, EffectType, ParamValue, SourceState } from "./types";
 
 export interface GalleryImage {
@@ -108,74 +108,14 @@ function withParams(type: EffectType, params: Record<string, ParamValue>): Effec
 }
 
 // ------------------------------------------------------------------ Randomize
-// Curated pools so a random look is coherent (a converter + a couple of mood
-// posts + maybe a grade), never a random pile of 20 effects.
-const STYLE_LOOKS: (() => Effect)[] = [
-  () => withParams("ascii", { cell: 8, colorMode: "source", background: "original", charOpacity: 0.85 }),
-  () => withParams("blockChars", { cell: 8, colorMode: "source", background: "original", charOpacity: 0.9 }),
-  () => withParams("ascii", { cell: 10, colorMode: "ink", ink: "#e9e4d8", paper: "#14130f" }),
-  () => withParams("glyphDots", { cell: 9, background: "original", charOpacity: 0.8 }),
-  () => withParams("crosshatch", { cell: 9, background: "original", charOpacity: 0.8 }),
-  () => withParams("mosaic", { size: 18, gap: 0.1 }),
-  () => withParams("lego", { size: 22 }),
-  () => withParams("halftone", { cell: 8, mode: "mono" }),
-  () => withParams("halftone", { cell: 12, gooey: 0.75, overflow: 0.3 }),
-  () => withParams("dither", { type: "bayer4", levels: 3 }),
-  () => withParams("dither", { type: "blueNoise", levels: 2, mono: true }),
-  () => withParams("diamond", { cell: 12, colorMode: "source", background: "original", charOpacity: 0.85 }),
-  () => withParams("kuwahara", { quality: "smooth", radius: 6 }),
-  () => withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }),
-];
-const MOOD_POST: (() => Effect)[] = [
-  () => withParams("grain", { amount: 0.14 }),
-  () => withParams("vignette", { amount: 0.45 }),
-  () => withParams("bloom", { intensity: 0.5, threshold: 0.65 }),
-  () => withParams("scanlines", { spacing: 3, intensity: 0.25 }),
-  () => withParams("chromatic", { amount: 4 }),
-];
-const GRADES: (() => Effect)[] = [
-  () => withParams("gradientMap", { stops: [{ t: 0, color: "#1a1230" }, { t: 1, color: "#f3d9b8" }], amount: 0.7 }),
-  () => withParams("adjust", { saturation: 1.25, contrast: 1.1 }),
-  () => withParams("tint", { color: "#e8c9a8", opacity: 0.25, blend: "soft-light" }),
-];
+// Randomize is scoped per surface (random image / video / preset / color /
+// pattern) — the old all-in-one "Inspire me" config generator is gone.
 
-const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
+export const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
 
-/** Jitter an effect's slider params ±12% of their range, clamped to the catalog. */
-function jitterEffect(e: Effect): Effect {
-  if (!e.type) return e;
-  const params = { ...e.params };
-  for (const c of EFFECT_CATALOG[e.type].controls) {
-    if (c.kind === "slider" && typeof params[c.key] === "number") {
-      const span = c.max - c.min;
-      let v = (params[c.key] as number) + (Math.random() * 2 - 1) * 0.12 * span;
-      v = Math.max(c.min, Math.min(c.max, v));
-      if (c.step >= 1) v = Math.round(v / c.step) * c.step;
-      params[c.key] = v;
-    }
-  }
-  return { ...e, params };
-}
-
-/** The coherent ~3–4-effect random stack shared by both inspire flavours. */
-export function inspireStack(): Effect[] {
-  const stack: Effect[] = [jitterEffect(pick(STYLE_LOOKS)())];
-  if (Math.random() < 0.5) stack.push(jitterEffect(pick(GRADES)())); // grade after the style
-  const moodCount = 1 + Math.floor(Math.random() * 2); // 1–2 moods
-  const moods = [...MOOD_POST].sort(() => Math.random() - 0.5).slice(0, moodCount);
-  for (const m of moods) stack.push(jitterEffect(m()));
-  return stack;
-}
-
-/** A coherent random look on a random gallery source (sync fallback). */
-export function inspire(): BgConfig {
-  const img = pick(GALLERY);
-  return {
-    version: 1,
-    output: { aspect: "3:2", longEdge: 2000 },
-    source: { mode: "image", imageId: img.id, solidColor: "#cdd9e0" },
-    stack: inspireStack(),
-  };
+/** A random gallery starter id — the offline fallback for random image. */
+export function randomGalleryId(): string {
+  return pick(GALLERY).id;
 }
 
 /** A random Pexels photo (or video) url as an imageId. Random tag + page
@@ -196,19 +136,6 @@ export async function randomPexelsId(kind: "photo" | "video" = "photo"): Promise
   } catch {
     return null;
   }
-}
-
-/** Inspire from a random Pexels photo, falling back to the gallery — the
- * button must always produce a look. */
-export async function inspireFromPexels(): Promise<BgConfig> {
-  const id = await randomPexelsId("photo");
-  if (!id) return inspire();
-  return {
-    version: 1,
-    output: { aspect: "3:2", longEdge: 2000 },
-    source: { mode: "image", imageId: id, solidColor: "#cdd9e0" },
-    stack: inspireStack(),
-  };
 }
 
 // The preset library. Curated heroes render as thumbnail cards in the
