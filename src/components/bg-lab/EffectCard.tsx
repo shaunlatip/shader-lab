@@ -24,9 +24,10 @@ export function EffectCard({ effect }: { effect: Effect }) {
   const meta = effect.type ? EFFECT_CATALOG[effect.type] : null;
   const style = { transform: CSS.Translate.toString(transform), transition };
 
-  // hide rows gated by an unmet `showIf` (e.g. Glyphs only when charSet = custom)
+  // hide rows gated by an unmet `showIf` (e.g. Glyphs only when charSet =
+  // custom) and rows marked `hidden` (params that exist but aren't user knobs)
   const visible = (meta?.controls ?? []).filter(
-    (c) => !c.showIf || c.showIf.in.includes(effect.params[c.showIf.key]),
+    (c) => !c.hidden && (!c.showIf || c.showIf.in.includes(effect.params[c.showIf.key])),
   );
   const grouped = visible.some((c) => c.group);
 
@@ -133,7 +134,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
                           )}
                         />
                         <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
-                          {CONTROL_GROUP_LABEL[g]}
+                          {meta.groupLabels?.[g] ?? CONTROL_GROUP_LABEL[g]}
                         </span>
                       </button>
                       {advOpen && <div className="flex flex-col gap-2.5">{rows.map(row)}</div>}
@@ -144,7 +145,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
                 return (
                   <div key={g} className="flex flex-col gap-2.5">
                     <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
-                      {CONTROL_GROUP_LABEL[g]}
+                      {meta.groupLabels?.[g] ?? CONTROL_GROUP_LABEL[g]}
                     </span>
                     {rows.map(row)}
                   </div>

@@ -29,6 +29,11 @@ export interface ShowIf {
 interface ControlCommon {
   group?: ControlGroup;
   showIf?: ShowIf;
+  /** Param exists (defaults, clamp, AI schema, engine) but renders no row.
+   * Used to keep param keys stable while removing an effect-identity knob
+   * from the UI (e.g. the glyph string on shape styles — users don't think
+   * of "Crosshatch" as characters). NEVER delete a key; hide it. */
+  hidden?: boolean;
 }
 
 export type ControlSpec = ControlCommon &
@@ -79,6 +84,9 @@ export interface EffectMeta {
   category: CategoryId;
   /** flag the live-perf hot-spots */
   heavy?: boolean;
+  /** Per-effect override for group headers — shape styles rename
+   * "Characters" to what the marks actually are ("Strokes", "Dots"). */
+  groupLabels?: Partial<Record<ControlGroup, string>>;
   controls: ControlSpec[];
 }
 
@@ -87,16 +95,32 @@ const BLENDS = ["soft-light", "overlay", "multiply", "screen"].map((v) => ({
   label: v,
 }));
 
-// Shared controls for the glyph family (ASCII, block, hatch, diamond, lines, …).
-// Each style overrides the glyph set, color mode and draw mode.
+// Shared controls for the glyph family, split into two control surfaces:
+//   family "ramp"  — ASCII / block / mixed. Users think in characters, so the
+//                    character set and glyph string stay front and center.
+//   family "shape" — crosshatch / diagonal / diamond / lines / dots. Users
+//                    think in marks (strokes, dots), not characters: the glyph
+//                    machinery is hidden (params kept — see rules below) and
+//                    the group header is renamed per effect via groupLabels.
+//
+// SAFETY RULES for editing this catalog (persisted configs depend on it):
+//   1. NEVER rename or delete a param key — set `hidden: true` instead.
+//      Saved sets/drafts snapshot full param objects; clampParams drops
+//      unknown keys on the AI-paste path.
+//   2. Changing a `default` only affects newly-added effects (snapshots are
+//      full), so defaults are safe to evolve.
+//   3. Any NEW key needs a behavior-neutral fallback in the CPU op and a
+//      matching GL uniform default, so pre-existing stacks render unchanged.
 function glyphControls(o: {
   cell: number;
   glyphs: string;
   colorMode: "ink" | "source";
   sizeByBrightness: boolean;
+  family: "ramp" | "shape";
 }): ControlSpec[] {
+  const shape = o.family === "shape";
   return [
-    // --- Characters: the glyph look ---
+    // --- Characters / Marks: the mark look ---
     { kind: "slider", group: "characters", key: "cell", label: "Size", min: 4, max: 48, step: 1, default: o.cell, unit: true },
     {
       kind: "select",
@@ -110,27 +134,29 @@ function glyphControls(o: {
         { value: "custom", label: "custom…" },
       ],
       default: "custom",
+      // Shape styles: the glyph IS the effect's identity — not a user knob.
+      hidden: shape,
     },
     // Raw glyph string only when the user picks "custom" — otherwise the preset
     // (or this style's built-in set) drives it. Folds two rows into one.
-    { kind: "text", group: "characters", key: "glyphs", label: "Glyphs", default: o.glyphs, maxLen: 64, showIf: { key: "charSet", in: ["custom"] } },
+    { kind: "text", group: "characters", key: "glyphs", label: "Glyphs", default: o.glyphs, maxLen: 64, showIf: { key: "charSet", in: ["custom"] }, hidden: shape },
+    // Scale of the mark within its cell. Promoted out of Advanced: it changes
+    // the whole texture of the render and is the knob people reach for first.
+    { kind: "slider", group: "characters", key: "fontScale", label: o.family === "shape" ? "Mark scale" : "Font scale", min: 0.3, max: 2, step: 0.05, default: 1 },
     {
       kind: "select",
       group: "characters",
-      key: "blendMode",
-      label: "Blend",
+      key: "colorMode",
+      label: "Color",
       options: [
-        { value: "normal", label: "normal" },
-        { value: "overlay", label: "overlay" },
-        { value: "colorDodge", label: "color dodge" },
-        { value: "screen", label: "screen" },
-        { value: "lighter", label: "lighter" },
+        { value: "source", label: "from image" },
+        { value: "ink", label: "solid ink" },
       ],
-      default: "normal",
+      default: o.colorMode,
     },
-    { kind: "slider", group: "characters", key: "charOpacity", label: "Char opacity", min: 0, max: 1, step: 0.01, default: 1 },
+    { kind: "color", group: "characters", key: "ink", label: "Ink", default: "#1a1713", showIf: { key: "colorMode", in: ["ink"] } },
+    { kind: "slider", group: "characters", key: "charOpacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: 1 },
     { kind: "switch", group: "characters", key: "invert", label: "Invert", default: false },
-    { kind: "switch", group: "characters", key: "dotGrid", label: "Dot grid", default: false },
 
     // --- Intensity: how the image maps onto the grid ---
     { kind: "slider", group: "intensity", key: "coverage", label: "Coverage", min: 0, max: 1, step: 0.01, default: 1 },
@@ -139,7 +165,7 @@ function glyphControls(o: {
     { kind: "slider", group: "intensity", key: "brightness", label: "Brightness", min: -1, max: 1, step: 0.01, default: 0 },
     { kind: "slider", group: "intensity", key: "contrast", label: "Contrast", min: 0.3, max: 2.5, step: 0.05, default: 1 },
 
-    // --- Background: what sits behind the glyphs ---
+    // --- Background: what sits behind the marks ---
     {
       kind: "select",
       group: "background",
@@ -153,29 +179,33 @@ function glyphControls(o: {
       ],
       // Ramp styles (ASCII/block/mixed): default to a *blurred* copy of the source
       // behind the dense glyphs — "based on the image", matching ascii-magic. Shape
-      // styles (dots/diamond/lines — sizeByBrightness): default to flat *paper* instead,
+      // styles (dots/diamond/lines — sizeByBrightness): default to flat *paper*,
       // because sparse source-coloured shapes drawn over the same (blurred) photo
-      // camouflage into it and read as nearly invisible. Paper keeps the image colour
-      // on the shapes while making them apparent.
+      // camouflage into it and read as nearly invisible.
       default: o.sizeByBrightness ? "paper" : "blurred",
     },
     { kind: "slider", group: "background", key: "bgBlur", label: "Blur", min: 0, max: 40, step: 0.5, default: 8, unit: true, showIf: { key: "background", in: ["blurred"] } },
+    // Physical-media default: light paper, dark marks — prints are ink on
+    // paper, not glow on a void. (Was #16140f dark; flipped in the defaults
+    // audit. Existing configs carry their own snapshot and are unaffected.)
+    { kind: "color", group: "background", key: "paper", label: "Paper", default: "#f1ece4", showIf: { key: "background", in: ["paper"] } },
 
     // --- Advanced: rarely touched / style-identity knobs ---
     {
       kind: "select",
       group: "advanced",
-      key: "colorMode",
-      label: "Color",
+      key: "blendMode",
+      label: "Blend",
       options: [
-        { value: "source", label: "from image" },
-        { value: "ink", label: "solid ink" },
+        { value: "normal", label: "normal" },
+        { value: "overlay", label: "overlay" },
+        { value: "colorDodge", label: "color dodge" },
+        { value: "screen", label: "screen" },
+        { value: "lighter", label: "lighter" },
       ],
-      default: o.colorMode,
+      default: "normal",
     },
-    { kind: "color", group: "advanced", key: "ink", label: "Ink", default: "#e9e4d8", showIf: { key: "colorMode", in: ["ink"] } },
-    { kind: "color", group: "advanced", key: "paper", label: "Paper", default: "#16140f", showIf: { key: "background", in: ["paper"] } },
-    { kind: "slider", group: "advanced", key: "fontScale", label: "Font scale", min: 0.3, max: 2, step: 0.05, default: 1 },
+    { kind: "switch", group: "advanced", key: "dotGrid", label: "Dot grid", default: false },
     { kind: "switch", group: "advanced", key: "sizeByBrightness", label: "Size by brightness", default: o.sizeByBrightness },
     { kind: "switch", group: "advanced", key: "randomize", label: "Randomize", default: false },
   ];
@@ -479,7 +509,7 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     label: "ASCII",
     blurb: "Classic text-character art from a brightness ramp",
     heavy: true,
-    controls: glyphControls({ cell: 10, glyphs: "@#S08Xx+=-;:,. ", colorMode: "source", sizeByBrightness: false }),
+    controls: glyphControls({ cell: 10, glyphs: "@#S08Xx+=-;:,. ", colorMode: "source", sizeByBrightness: false, family: "ramp" }),
   },
   blockChars: {
     type: "blockChars",
@@ -487,7 +517,7 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     label: "Block chars",
     blurb: "Unicode block glyphs — dense terminal aesthetic",
     heavy: true,
-    controls: glyphControls({ cell: 9, glyphs: "█▓▒░ ", colorMode: "source", sizeByBrightness: false }),
+    controls: glyphControls({ cell: 9, glyphs: "█▓▒░ ", colorMode: "source", sizeByBrightness: false, family: "ramp" }),
   },
   mixed: {
     type: "mixed",
@@ -495,15 +525,16 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     label: "Mixed glyphs",
     blurb: "Rich multi-glyph ramp, sampled in source color",
     heavy: true,
-    controls: glyphControls({ cell: 11, glyphs: "@#WM&8B%$Xx+=-:. ", colorMode: "source", sizeByBrightness: false }),
+    controls: glyphControls({ cell: 11, glyphs: "@#WM&8B%$Xx+=-:. ", colorMode: "source", sizeByBrightness: false, family: "ramp" }),
   },
   crosshatch: {
     type: "crosshatch",
     category: "converter",
     label: "Crosshatch",
-    blurb: "Woven ✕ glyphs sized by darkness",
+    blurb: "Woven ✕ strokes sized by darkness",
     heavy: true,
-    controls: glyphControls({ cell: 10, glyphs: "╳", colorMode: "source", sizeByBrightness: true }),
+    groupLabels: { characters: "Strokes" },
+    controls: glyphControls({ cell: 10, glyphs: "╳", colorMode: "source", sizeByBrightness: true, family: "shape" }),
   },
   diagonal: {
     type: "diagonal",
@@ -511,15 +542,17 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     label: "Diagonal hatch",
     blurb: "Slanted strokes — engraved texture",
     heavy: true,
-    controls: glyphControls({ cell: 10, glyphs: "╱", colorMode: "source", sizeByBrightness: true }),
+    groupLabels: { characters: "Strokes" },
+    controls: glyphControls({ cell: 10, glyphs: "╱", colorMode: "source", sizeByBrightness: true, family: "shape" }),
   },
   diamond: {
     type: "diamond",
     category: "converter",
     label: "Diamonds",
-    blurb: "Jewel-like ◆ glyphs, brightness-sized",
+    blurb: "Jewel-like ◆ marks, brightness-sized",
     heavy: true,
-    controls: glyphControls({ cell: 12, glyphs: "◆", colorMode: "source", sizeByBrightness: true }),
+    groupLabels: { characters: "Marks" },
+    controls: glyphControls({ cell: 12, glyphs: "◆", colorMode: "source", sizeByBrightness: true, family: "shape" }),
   },
   lines: {
     type: "lines",
@@ -527,7 +560,8 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     label: "Vertical lines",
     blurb: "Rain / barcode strokes — minimal, graphic",
     heavy: true,
-    controls: glyphControls({ cell: 8, glyphs: "│", colorMode: "source", sizeByBrightness: true }),
+    groupLabels: { characters: "Strokes" },
+    controls: glyphControls({ cell: 8, glyphs: "│", colorMode: "source", sizeByBrightness: true, family: "shape" }),
   },
   glyphDots: {
     type: "glyphDots",
@@ -535,7 +569,8 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     label: "Dots",
     blurb: "Halftone-print circles scaled by brightness",
     heavy: true,
-    controls: glyphControls({ cell: 10, glyphs: "●", colorMode: "source", sizeByBrightness: true }),
+    groupLabels: { characters: "Dots" },
+    controls: glyphControls({ cell: 10, glyphs: "●", colorMode: "source", sizeByBrightness: true, family: "shape" }),
   },
   braille: {
     type: "braille",
@@ -573,8 +608,8 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         ],
         default: "source",
       },
-      { kind: "color", group: "advanced", key: "ink", label: "Ink", default: "#e9e4d8", showIf: { key: "colorMode", in: ["ink"] } },
-      { kind: "color", group: "advanced", key: "paper", label: "Paper", default: "#16140f", showIf: { key: "background", in: ["paper"] } },
+      { kind: "color", group: "advanced", key: "ink", label: "Ink", default: "#1a1713", showIf: { key: "colorMode", in: ["ink"] } },
+      { kind: "color", group: "advanced", key: "paper", label: "Paper", default: "#f1ece4", showIf: { key: "background", in: ["paper"] } },
     ],
   },
   mosaic: {
