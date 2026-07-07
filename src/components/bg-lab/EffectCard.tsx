@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronRight, GripVertical, X } from "lucide-react";
+import { Minus } from "@phosphor-icons/react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -50,23 +51,15 @@ export function EffectCard({ effect }: { effect: Effect }) {
         !effect.enabled && "opacity-55",
       )}
     >
-      <div className="flex items-center gap-1 px-1.5 py-1.5">
-        {/* Secondary affordances (grip, remove) reveal on hover or keyboard
-            focus — the resting row is just chevron + name + switch. They stay
-            in the DOM and tab order throughout. */}
-        <button
-          type="button"
-          className={cn(
-            "cursor-grab touch-none rounded p-0.5 text-text-secondary transition-[color,opacity] duration-150 hover:text-text-primary focus-visible:opacity-100 active:cursor-grabbing",
-            isDragging ? "opacity-100" : "opacity-0 group-hover/card:opacity-100 group-focus-within/card:opacity-100",
-          )}
-          aria-label="Drag to reorder"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
-
+      {/* The whole header row is the drag handle (hold anywhere and move —
+          no grip icon; the 4px sensor activation keeps plain clicks working).
+          Keyboard reorder keeps working through the sortable attributes on
+          this row (space to lift, arrows to move). */}
+      <div
+        className="flex touch-none items-center gap-1 px-1.5 py-1.5"
+        {...attributes}
+        {...listeners}
+      >
         {/* Static label — type is chosen at add-time via the search field, so
             the card itself carries no dropdown. Click anywhere on the label to
             expand the controls. */}
@@ -99,9 +92,9 @@ export function EffectCard({ effect }: { effect: Effect }) {
           size="icon-xs"
           onClick={() => dispatch({ t: "remove", id: effect.id })}
           aria-label="Remove effect"
-          className="text-text-secondary opacity-0 transition-[transform,color,opacity] duration-150 group-focus-within/card:opacity-100 group-hover/card:opacity-100 hover:text-text-primary focus-visible:opacity-100 active:scale-90"
+          className="text-text-secondary transition-[transform,color] duration-150 hover:text-text-primary active:scale-90"
         >
-          <X className="h-4 w-4" />
+          <Minus className="h-4 w-4" />
         </Button>
       </div>
 
