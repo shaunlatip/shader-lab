@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { suggestDraftName } from "@/lib/bg-lab/library";
 import { useBgLab } from "./BgLabProvider";
 import { useLibrary } from "./LibraryProvider";
+import { ThemeToggle } from "./ThemeToggle";
 import { labButton } from "./panel";
 
 export function CanvasHeader() {
@@ -25,6 +26,8 @@ export function CanvasHeader() {
         />
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <ThemeToggle />
+        <div className="mx-0.5 h-4 w-px bg-border-default" />
         <Button
           type="button"
           size="sm"
