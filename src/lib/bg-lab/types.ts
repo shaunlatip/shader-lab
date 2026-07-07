@@ -69,7 +69,17 @@ export interface SourceTransform {
   crop?: { x: number; y: number; w: number; h: number };
 }
 
-export type PatternType = "dotGrid" | "lineGrid" | "checker" | "stripes" | "rings" | "iso";
+export type PatternType =
+  | "dotGrid"
+  | "lineGrid"
+  | "graph"
+  | "checker"
+  | "stripes"
+  | "waves"
+  | "rings"
+  | "iso"
+  | "plusGrid"
+  | "halftoneGradient";
 
 export interface PatternState {
   type: PatternType;

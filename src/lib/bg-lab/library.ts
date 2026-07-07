@@ -55,10 +55,14 @@ export function loadDrafts(): Draft[] {
 const PATTERN_TYPE_LABEL: Record<string, string> = {
   dotGrid: "Dot grid",
   lineGrid: "Line grid",
+  graph: "Graph paper",
   checker: "Checker",
   stripes: "Stripes",
+  waves: "Waves",
   rings: "Rings",
   iso: "Iso lattice",
+  plusGrid: "Plus grid",
+  halftoneGradient: "Halftone ramp",
 };
 
 /** Human label for a source, for auto-naming. */

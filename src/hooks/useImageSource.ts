@@ -3,15 +3,19 @@ import { galleryUrl } from "@/lib/bg-lab/presets";
 import type { PatternState, SourceState } from "@/lib/bg-lab/types";
 import type { EngineSource } from "@/lib/bg-lab/engine";
 
+// Leuchtturm-notebook dot grid: small pale-gray dots on off-white paper —
+// the physical ideal for a dot grid, and a light default (dark patterns were
+// the odd one out; most real-world uses are paper-light). Stored patterns in
+// existing configs carry their own values and are unaffected.
 export const DEFAULT_PATTERN: PatternState = {
   type: "dotGrid",
-  cell: 24,
-  weight: 0.3,
+  cell: 28,
+  weight: 0.12,
   jitter: 0,
   angle: 0,
   stagger: false,
-  fg: "#e7e5e4",
-  bg: "#16140f",
+  fg: "#b9b6b0",
+  bg: "#f5f4f1",
 };
 
 // Resolve an imageId to a URL: gallery ids map to /explorations/..., everything
