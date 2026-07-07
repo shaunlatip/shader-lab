@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import type { GradientStop } from "@/lib/bg-lab/types";
+import { ColorField } from "./ColorField";
 
 export function GradientStops({
   stops,
@@ -44,12 +45,7 @@ export function GradientStops({
       <div className="flex flex-col gap-1.5">
         {stops.map((s, i) => (
           <div key={i} className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
-            <input
-              type="color"
-              value={s.color}
-              onChange={(e) => update(i, { color: e.target.value })}
-              className="h-6 w-8 cursor-pointer rounded border border-border-default bg-transparent p-0"
-            />
+            <ColorField compact value={s.color} onChange={(hex) => update(i, { color: hex })} />
             <Slider value={[s.t]} min={0} max={1} step={0.01} onValueChange={(a) => update(i, { t: a[0] })} />
             <Button
               type="button"

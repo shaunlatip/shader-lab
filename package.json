@@ -18,6 +18,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
+    "culori": "^4.0.2",
     "gifenc": "1.0.3",
     "lucide-react": "1.21.0",
     "mp4-muxer": "5.2.2",
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/culori": "^4.0.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

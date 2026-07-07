@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import type { ControlSpec } from "@/lib/bg-lab/catalog";
 import type { GradientStop, ParamValue } from "@/lib/bg-lab/types";
+import { ColorField } from "./ColorField";
 import { GradientStops } from "./GradientStops";
 
 function fmt(n: number) {
@@ -82,15 +83,7 @@ export function ControlRow({
     return (
       <div className="grid grid-cols-[84px_1fr] items-center gap-2">
         <Label className="text-xs text-text-secondary">{spec.label}</Label>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            value={v}
-            onChange={(e) => onChange(e.target.value)}
-            className="h-7 w-9 cursor-pointer rounded border border-border-default bg-transparent p-0"
-          />
-          <span className="font-mono text-[11px] uppercase text-text-secondary">{v}</span>
-        </div>
+        <ColorField value={v} onChange={onChange} className="w-fit" />
       </div>
     );
   }
