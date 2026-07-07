@@ -15,6 +15,7 @@ import {
 import type { Effect } from "@/lib/bg-lab/types";
 import { useBgLab } from "./BgLabProvider";
 import { ControlRow } from "./controls/ControlRow";
+import { IconTip } from "./panel";
 
 export function EffectCard({ effect }: { effect: Effect }) {
   const { dispatch } = useBgLab();
@@ -86,16 +87,18 @@ export function EffectCard({ effect }: { effect: Effect }) {
           aria-label="Toggle effect"
         />
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => dispatch({ t: "remove", id: effect.id })}
-          aria-label="Remove effect"
-          className="text-text-secondary transition-[transform,color] duration-150 hover:text-text-primary active:scale-90"
-        >
-          <Minus className="h-4 w-4" />
-        </Button>
+        <IconTip label="Remove effect">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => dispatch({ t: "remove", id: effect.id })}
+            aria-label="Remove effect"
+            className="text-text-secondary transition-[transform,color] duration-150 hover:text-text-primary active:scale-90"
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
+        </IconTip>
       </div>
 
       {open && meta && (

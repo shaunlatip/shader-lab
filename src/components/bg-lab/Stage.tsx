@@ -8,6 +8,7 @@ import { IDENTITY, clampZoom, zoomToward, type View } from "@/lib/bg-lab/zoom";
 import type { Dims } from "@/lib/bg-lab/types";
 import { useBgLab } from "./BgLabProvider";
 import { useEngineSource } from "./SourceProvider";
+import { IconTip } from "./panel";
 import { VideoTransport } from "./VideoTransport";
 
 const PAD = 56;
@@ -260,28 +261,38 @@ export function Stage() {
           ))}
         </div>
         <div className="mx-0.5 h-4 w-px bg-border-default" />
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1 / 1.2, 0, 0))} aria-label="Zoom out">
-          <Minus className="h-3.5 w-3.5" />
-        </Button>
+        <IconTip label="Zoom out">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1 / 1.2, 0, 0))} aria-label="Zoom out">
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
         <button
           className="pointer-events-auto min-w-[44px] rounded text-center font-mono text-[11px] tabular-nums text-text-primary transition-[transform,color] duration-150 hover:text-text-secondary active:scale-95"
           onClick={() => setView(IDENTITY)}
         >
           {zoomPct}%
         </button>
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1.2, 0, 0))} aria-label="Zoom in">
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
+        <IconTip label="Zoom in">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1.2, 0, 0))} aria-label="Zoom in">
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
         <div className="mx-0.5 h-4 w-px bg-border-default" />
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Fit">
-          <Maximize className="h-3.5 w-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={oneToOne} aria-label="100%">
-          <span className="font-mono text-[10px]">1:1</span>
-        </Button>
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Reset">
-          <RotateCcw className="h-3.5 w-3.5" />
-        </Button>
+        <IconTip label="Fit to view">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Fit">
+            <Maximize className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
+        <IconTip label="Zoom to 100%">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={oneToOne} aria-label="100%">
+            <span className="font-mono text-[10px]">1:1</span>
+          </Button>
+        </IconTip>
+        <IconTip label="Reset view">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Reset">
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
       </div>
     </div>
   );

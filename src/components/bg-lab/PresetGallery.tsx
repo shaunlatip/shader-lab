@@ -22,7 +22,7 @@ import {
 } from "@/lib/bg-lab/presets";
 import type { SavedEffect } from "@/lib/bg-lab/library";
 import { useLibrary } from "./LibraryProvider";
-import { CollapsibleSection, labButton } from "./panel";
+import { CollapsibleSection, IconTip, labButton } from "./panel";
 
 const thumb = (slug: string) => `/presets/${slug}.webp`;
 
@@ -61,14 +61,16 @@ function UserChip({ set, onApply, onRemove }: { set: SavedEffect; onApply: () =>
       >
         {set.name}
       </button>
-      <button
-        type="button"
-        aria-label={`Delete ${set.name}`}
-        onClick={onRemove}
-        className="absolute right-1 top-1/2 grid h-4 w-4 -translate-y-1/2 place-items-center rounded-full text-text-secondary opacity-0 transition-opacity hover:text-text-primary group-hover/chip:opacity-100"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      <IconTip label="Delete set">
+        <button
+          type="button"
+          aria-label={`Delete ${set.name}`}
+          onClick={onRemove}
+          className="absolute right-1 top-1/2 grid h-4 w-4 -translate-y-1/2 place-items-center rounded-full text-text-secondary opacity-0 transition-opacity hover:text-text-primary focus-visible:opacity-100 group-hover/chip:opacity-100"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </IconTip>
     </div>
   );
 }
@@ -115,22 +117,26 @@ export function PresetGallery() {
       defaultOpen
       action={
         <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={shuffle}
-            aria-label="Apply a random preset"
-            className="grid h-6 w-6 place-items-center rounded-control text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <Shuffle className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setSearchOpen(true)}
-            aria-label="Browse all presets"
-            className="grid h-6 w-6 place-items-center rounded-control text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-          </button>
+          <IconTip label="Random preset">
+            <button
+              type="button"
+              onClick={shuffle}
+              aria-label="Apply a random preset"
+              className="grid h-6 w-6 place-items-center rounded-control text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              <Shuffle className="h-3.5 w-3.5" />
+            </button>
+          </IconTip>
+          <IconTip label="Browse all presets">
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Browse all presets"
+              className="grid h-6 w-6 place-items-center rounded-control text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+          </IconTip>
         </div>
       }
     >
@@ -169,13 +175,15 @@ export function PresetGallery() {
               placeholder="Save current effects…"
               className="h-8 text-xs"
             />
-            <button
-              type="submit"
-              aria-label="Save current effects"
-              className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-control")}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+            <IconTip label="Save current effects">
+              <button
+                type="submit"
+                aria-label="Save current effects"
+                className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-control")}
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </IconTip>
           </form>
           {saved.length > 0 && (
             <div className="flex flex-wrap gap-1.5">

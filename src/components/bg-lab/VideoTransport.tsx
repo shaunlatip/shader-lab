@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, Repeat, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { IconTip } from "./panel";
 
 const fmt = (s: number) => {
   if (!Number.isFinite(s)) return "0:00";
@@ -102,12 +103,16 @@ export function VideoTransport({ video }: { video: HTMLVideoElement }) {
   return (
     <div className="pointer-events-auto absolute bottom-14 left-1/2 flex w-[min(520px,86%)] -translate-x-1/2 flex-col gap-1.5 rounded-2xl border border-border-default bg-canvas/90 px-3 py-2 text-text-primary shadow-3 backdrop-blur">
       <div className="flex items-center gap-2">
-        <button type="button" onClick={toggle} className={cn(iconBtn, "bg-surface-hover hover:bg-surface-active")} aria-label={playing ? "Pause" : "Play"}>
-          {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-        </button>
-        <button type="button" onClick={stop} className={cn(iconBtn, "text-text-secondary hover:bg-surface-hover hover:text-text-primary")} aria-label="Stop">
-          <Square className="h-3 w-3" />
-        </button>
+        <IconTip label={playing ? "Pause" : "Play"}>
+          <button type="button" onClick={toggle} className={cn(iconBtn, "bg-surface-hover hover:bg-surface-active")} aria-label={playing ? "Pause" : "Play"}>
+            {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+          </button>
+        </IconTip>
+        <IconTip label="Stop">
+          <button type="button" onClick={stop} className={cn(iconBtn, "text-text-secondary hover:bg-surface-hover hover:text-text-primary")} aria-label="Stop">
+            <Square className="h-3 w-3" />
+          </button>
+        </IconTip>
         <span className="shrink-0 font-mono text-[10px] tabular-nums text-text-secondary">{fmt(t)}</span>
         <input
           type="range"
@@ -122,9 +127,11 @@ export function VideoTransport({ video }: { video: HTMLVideoElement }) {
           className="h-1 flex-1 cursor-pointer accent-accent"
         />
         <span className="shrink-0 font-mono text-[10px] tabular-nums text-text-secondary">{fmt(dur)}</span>
-        <button type="button" onClick={toggleLoop} className={cn(iconBtn, loop ? "bg-surface-active text-text-primary" : "text-text-secondary hover:bg-surface-hover")} aria-label="Toggle loop">
-          <Repeat className="h-3.5 w-3.5" />
-        </button>
+        <IconTip label={loop ? "Loop on" : "Loop off"}>
+          <button type="button" onClick={toggleLoop} className={cn(iconBtn, loop ? "bg-surface-active text-text-primary" : "text-text-secondary hover:bg-surface-hover")} aria-label="Toggle loop">
+            <Repeat className="h-3.5 w-3.5" />
+          </button>
+        </IconTip>
       </div>
       <div className="flex items-center justify-between gap-2 px-0.5">
         <div className="flex items-center gap-1.5">

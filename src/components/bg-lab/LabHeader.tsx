@@ -1,14 +1,14 @@
 "use client";
 
 import { toast } from "sonner";
-import { PanelLeft, PanelRight, RotateCcw, Save } from "lucide-react";
+import { Check, PanelLeft, PanelRight, RotateCcw, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { suggestDraftName } from "@/lib/bg-lab/library";
 import { useBgLab } from "./BgLabProvider";
 import { useLibrary } from "./LibraryProvider";
 import { ThemeToggle } from "./ThemeToggle";
-import { labButton } from "./panel";
+import { IconTip, labButton } from "./panel";
 
 /**
  * The one app header: wordmark + panel toggles on the left, file (draft)
@@ -28,21 +28,23 @@ export function LabHeader({
   onToggleRight: () => void;
 }) {
   const { config } = useBgLab();
-  const { draftName, setDraftName, saveDraft, revertDraft, activeDraftId } = useLibrary();
+  const { draftName, setDraftName, saveDraft, revertDraft, activeDraftId, dirty } = useLibrary();
   const suggested = suggestDraftName(config);
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border-default bg-canvas px-3">
       <div className="flex min-w-0 items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onToggleLeft}
-          aria-expanded={!leftCollapsed}
-          aria-label={leftCollapsed ? "Show source panel" : "Hide source panel"}
-        >
-          <PanelLeft className="h-4 w-4" />
-        </Button>
+        <IconTip label={leftCollapsed ? "Show source panel" : "Hide source panel"} side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onToggleLeft}
+            aria-expanded={!leftCollapsed}
+            aria-label={leftCollapsed ? "Show source panel" : "Hide source panel"}
+          >
+            <PanelLeft className="h-4 w-4" />
+          </Button>
+        </IconTip>
         <span className="font-nagel text-[17px] font-semibold tracking-[-0.01em] text-text-primary">
           Shader Lab
         </span>
@@ -71,31 +73,41 @@ export function LabHeader({
         >
           <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reset
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          className={cn(
-            "bg-text-primary text-canvas transition-[transform,background-color] duration-150 hover:bg-text-primary/90 active:scale-[0.98]",
-          )}
-          onClick={() => {
-            saveDraft(draftName);
-            toast.success(activeDraftId ? "Draft updated" : "Draft saved", {
-              description: draftName.trim() || suggested,
-            });
-          }}
-        >
-          <Save className="mr-1.5 h-3.5 w-3.5" /> {activeDraftId ? "Update draft" : "Save draft"}
-        </Button>
+        {/* Save reflects the editor state: something to save (create or
+            update) vs. everything saved (disabled, quiet). */}
+        {dirty ? (
+          <Button
+            type="button"
+            size="sm"
+            className={cn(
+              "bg-text-primary text-canvas transition-[transform,background-color] duration-150 hover:bg-text-primary/90 active:scale-[0.98]",
+            )}
+            onClick={() => {
+              saveDraft(draftName);
+              toast.success(activeDraftId ? "Draft updated" : "Draft saved", {
+                description: draftName.trim() || suggested,
+              });
+            }}
+          >
+            <Save className="mr-1.5 h-3.5 w-3.5" /> {activeDraftId ? "Update draft" : "Save draft"}
+          </Button>
+        ) : (
+          <Button type="button" size="sm" variant="outline" disabled className={cn(labButton, "opacity-70")}>
+            <Check className="mr-1.5 h-3.5 w-3.5" /> Saved
+          </Button>
+        )}
         <div className="mx-0.5 h-4 w-px bg-border-default" />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onToggleRight}
-          aria-expanded={!rightCollapsed}
-          aria-label={rightCollapsed ? "Show effects panel" : "Hide effects panel"}
-        >
-          <PanelRight className="h-4 w-4" />
-        </Button>
+        <IconTip label={rightCollapsed ? "Show effects panel" : "Hide effects panel"} side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onToggleRight}
+            aria-expanded={!rightCollapsed}
+            aria-label={rightCollapsed ? "Show effects panel" : "Hide effects panel"}
+          >
+            <PanelRight className="h-4 w-4" />
+          </Button>
+        </IconTip>
       </div>
     </header>
   );

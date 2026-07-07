@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
+import { IconTip } from "./panel";
 
 // Canonical hydration-safe mounted check (no setState-in-effect):
 // server snapshot false, client snapshot true, never re-subscribes.
@@ -36,23 +37,22 @@ export function ThemeToggle() {
     }
   };
 
+  const label = mounted ? `Switch to ${isDark ? "light" : "dark"} theme` : "Switch theme";
+
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      onClick={toggle}
-      aria-label={mounted ? `Switch to ${isDark ? "light" : "dark"} theme` : "Switch theme"}
-    >
-      <span
-        aria-hidden
-        className="theme-toggle-circle-topbar block h-3.5 w-3.5 rounded-full border-[1.5px] border-current"
-        style={{
-          // Half-filled disc: reads as "the other side" of the theme.
-          background: mounted
-            ? `linear-gradient(90deg, currentColor 50%, transparent 50%)`
-            : undefined,
-        }}
-      />
-    </Button>
+    <IconTip label={label} side="bottom">
+      <Button variant="ghost" size="icon-sm" onClick={toggle} aria-label={label}>
+        <span
+          aria-hidden
+          className="theme-toggle-circle-topbar block h-3.5 w-3.5 rounded-full border-[1.5px] border-current"
+          style={{
+            // Half-filled disc: reads as "the other side" of the theme.
+            background: mounted
+              ? `linear-gradient(90deg, currentColor 50%, transparent 50%)`
+              : undefined,
+          }}
+        />
+      </Button>
+    </IconTip>
   );
 }

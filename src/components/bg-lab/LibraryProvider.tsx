@@ -30,6 +30,9 @@ interface LibCtx {
   removeSaved: (id: string) => void;
   /** The draft the editor is currently bound to (updates write to it). */
   activeDraftId: string | null;
+  /** True when the editor differs from the active draft's saved state (or no
+   * draft is active yet) — i.e. there is something to save. */
+  dirty: boolean;
   /** Save the editor state: updates the active draft in place, else creates one. */
   saveDraft: (name: string) => void;
   /** Always fork a new draft (and make it active). */
@@ -73,6 +76,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   }, [drafts]);
 
+  // Cheap deep-compare: configs are small serializable objects with a stable
+  // key order (both sides originate from the same reducers/clones), so
+  // stringify equality is reliable here. Effect ids are stripped — loadDraft
+  // re-ids the stack, and identity shouldn't read as an unsaved change.
+  const active = activeDraftId ? drafts.find((d) => d.id === activeDraftId) : null;
+  const normalize = (c: typeof config) =>
+    JSON.stringify({ ...c, stack: c.stack.map(({ id: _id, ...rest }) => rest) });
+  const dirty = !active || normalize(active.config) !== normalize(config);
+
   const value = useMemo<LibCtx>(
     () => ({
       builtins,
@@ -80,6 +92,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       drafts,
       draftName,
       setDraftName,
+      dirty,
       saveStack: (name) =>
         setSaved((s) => [{ id: nanoid(8), name: name.trim() || "Untitled set", stack: reIdStack(config.stack) }, ...s]),
       saveStackFrom: (name, stack) =>
@@ -136,7 +149,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [builtins, saved, drafts, draftName, activeDraftId, config, dispatch],
+    [builtins, saved, drafts, draftName, activeDraftId, dirty, config, dispatch],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

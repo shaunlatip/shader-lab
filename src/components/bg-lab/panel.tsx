@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Shared lab chrome. One button language + one section-header treatment so the
@@ -11,6 +12,27 @@ import { cn } from "@/lib/utils";
 // language. Use on secondary/utility buttons via className.
 export const labButton =
   "border border-border-default bg-canvas text-text-primary shadow-xs transition-[transform,background-color,border-color] duration-150 hover:border-border-strong hover:bg-surface-hover active:scale-[0.98]";
+
+/** Tooltip label for icon-only buttons — every icon button gets one so no
+ * affordance relies on the icon reading alone. Wraps a single element. */
+export function IconTip({
+  label,
+  side = "top",
+  children,
+}: {
+  label: ReactNode;
+  side?: "top" | "bottom" | "left" | "right";
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side={side} className="lab-chrome font-lab">
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 /**
  * Section header: a light Title-Case label (not a heavy uppercase eyebrow) with
