@@ -142,7 +142,7 @@ export function PexelsSearch({ kind = "photo" }: { kind?: "photo" | "video" }) {
                               : { mode: "image", imageId: `pexels:${r.full}` },
                         })
                       }
-                      className="group relative aspect-square overflow-hidden rounded-md border-2 border-transparent transition-[transform,border-color] duration-150 ease-out hover:border-border-strong motion-safe:active:scale-[0.96]"
+                      className="group relative aspect-square overflow-hidden rounded-control border-2 border-transparent transition-[transform,border-color] duration-150 ease-out hover:border-border-strong motion-safe:active:scale-[0.96]"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img

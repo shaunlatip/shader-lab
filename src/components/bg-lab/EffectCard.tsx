@@ -44,7 +44,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
       ref={setNodeRef}
       style={style}
       className={cn(
-        "group/card rounded-md border border-border-default bg-canvas transition-[opacity,box-shadow,border-color] duration-150 ease-out",
+        "group/card rounded-card border border-border-default bg-canvas transition-[opacity,box-shadow,border-color] duration-150 ease-out",
         isDragging ? "z-10 opacity-90 shadow-3" : "hover:border-border-strong",
         !effect.enabled && "opacity-55",
       )}

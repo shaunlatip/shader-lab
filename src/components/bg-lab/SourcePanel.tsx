@@ -53,7 +53,7 @@ export function SourcePanel() {
         <button
           type="button"
           onClick={() => dispatch({ t: "replace", config: inspire() })}
-          className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-md text-[12px]")}
+          className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px]")}
         >
           <Sparkles className="h-3.5 w-3.5" /> Inspire me
         </button>
@@ -61,7 +61,7 @@ export function SourcePanel() {
           <button
             type="button"
             onClick={() => setCropOpen(true)}
-            className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-md text-[12px]")}
+            className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px]")}
           >
             <Crop className="h-3.5 w-3.5" /> Crop{transformed ? " ·" : ""}
           </button>
@@ -95,7 +95,7 @@ export function SourcePanel() {
                   title={g.label}
                   onClick={() => dispatch({ t: "setSource", patch: { imageId: g.id } })}
                   className={cn(
-                    "group aspect-square overflow-hidden rounded-md border-2 transition-[transform,border-color] duration-150 ease-out motion-safe:active:scale-[0.96]",
+                    "group aspect-square overflow-hidden rounded-control border-2 transition-[transform,border-color] duration-150 ease-out motion-safe:active:scale-[0.96]",
                     source.imageId === g.id
                       ? "border-text-primary"
                       : "border-transparent hover:border-border-strong",
@@ -122,7 +122,7 @@ export function SourcePanel() {
           <button
             type="button"
             onClick={() => videoRef.current?.click()}
-            className="flex h-9 items-center justify-center gap-2 rounded-md border border-border-default bg-canvas text-[13px] text-text-primary transition-colors hover:border-border-strong"
+            className="flex h-9 items-center justify-center gap-2 rounded-control border border-border-default bg-canvas text-[13px] text-text-primary transition-colors hover:border-border-strong"
           >
             <Upload className="h-3.5 w-3.5" /> Upload video
           </button>

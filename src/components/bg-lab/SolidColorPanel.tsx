@@ -30,7 +30,7 @@ export function SolidColorPanel() {
       <SectionHeader>Color</SectionHeader>
 
       {/* Large preview — clicking anywhere opens the OS color picker. */}
-      <label className="relative block h-20 w-full overflow-hidden rounded-md border border-border-default">
+      <label className="relative block h-20 w-full overflow-hidden rounded-control border border-border-default">
         <span className="absolute inset-0" style={{ backgroundColor: color }} />
         <input
           type="color"
@@ -44,7 +44,7 @@ export function SolidColorPanel() {
       {/* Hex field */}
       <div className="grid grid-cols-[40px_1fr] items-center gap-2">
         <span className="text-[11px] text-text-secondary">Hex</span>
-        <div className="flex items-center gap-1.5 rounded-md border border-border-default bg-canvas px-2.5 py-1.5 focus-within:border-border-strong">
+        <div className="flex items-center gap-1.5 rounded-control border border-border-default bg-canvas px-2.5 py-1.5 focus-within:border-border-strong">
           <span className="text-text-secondary">#</span>
           <input
             value={hex.replace(/^#/, "")}
@@ -71,7 +71,7 @@ export function SolidColorPanel() {
               title={s}
               onClick={() => set(s)}
               className={cn(
-                "aspect-square rounded-md border transition-[transform,border-color] duration-150 ease-out motion-safe:active:scale-90",
+                "aspect-square rounded-control border transition-[transform,border-color] duration-150 ease-out motion-safe:active:scale-90",
                 color.toLowerCase() === s
                   ? "border-text-primary"
                   : "border-black/10 hover:border-border-strong",

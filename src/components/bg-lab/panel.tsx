@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 // White surface, subtle gray outline — the segmented-control / Paper "Copy link"
 // language. Use on secondary/utility buttons via className.
 export const labButton =
-  "border border-border-default bg-canvas text-text-primary shadow-xs transition-[transform,background-color,border-color] duration-150 hover:border-border-strong hover:bg-shade-9 active:scale-[0.98]";
+  "border border-border-default bg-canvas text-text-primary shadow-xs transition-[transform,background-color,border-color] duration-150 hover:border-border-strong hover:bg-surface-hover active:scale-[0.98]";
 
 /**
  * Section header: a light Title-Case label (not a heavy uppercase eyebrow) with

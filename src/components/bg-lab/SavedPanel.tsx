@@ -15,7 +15,7 @@ function Chip({ set, onApply, onRemove }: { set: SavedEffect; onApply: () => voi
         onClick={onApply}
         title={`${set.name} — ${set.stack.length} effect${set.stack.length === 1 ? "" : "s"}`}
         className={cn(
-          "max-w-full truncate rounded-full border border-border-default bg-canvas py-1 text-[12px] text-text-secondary transition-[transform,color,border-color,background-color] duration-150 ease-out hover:border-border-strong hover:bg-shade-9 hover:text-text-primary motion-safe:active:scale-[0.96]",
+          "max-w-full truncate rounded-full border border-border-default bg-canvas py-1 text-[12px] text-text-secondary transition-[transform,color,border-color,background-color] duration-150 ease-out hover:border-border-strong hover:bg-surface-hover hover:text-text-primary motion-safe:active:scale-[0.96]",
           onRemove ? "pl-3 pr-6" : "px-3",
         )}
       >
@@ -62,7 +62,7 @@ export function SavedPanel() {
             placeholder="Save current effects…"
             className="h-8 text-xs"
           />
-          <button type="submit" aria-label="Save current effects" className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-md")}>
+          <button type="submit" aria-label="Save current effects" className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-control")}>
             <Plus className="h-4 w-4" />
           </button>
         </form>

@@ -48,7 +48,7 @@ export function DraftsPanel() {
           type="submit"
           aria-label={activeDraftId ? "Update draft" : "Save draft"}
           title={activeDraftId ? "Update draft" : "Save draft"}
-          className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-md")}
+          className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-control")}
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -58,7 +58,7 @@ export function DraftsPanel() {
             onClick={saveNew}
             aria-label="Save as new draft"
             title="Save as new draft"
-            className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-md")}
+            className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-control")}
           >
             <CopyPlus className="h-4 w-4" />
           </button>
@@ -76,7 +76,7 @@ export function DraftsPanel() {
           {list.map((d) => (
             <div
               key={d.id}
-              className="group/draft flex items-center gap-2 rounded-md border border-border-default bg-canvas p-2 transition-colors hover:border-border-strong"
+              className="group/draft flex items-center gap-2 rounded-card border border-border-default bg-canvas p-2 transition-colors hover:border-border-strong"
             >
               <button type="button" onClick={() => loadDraft(d.id)} className="flex min-w-0 flex-1 flex-col items-start text-left">
                 <span className="w-full truncate text-[13px] font-medium text-text-primary">{d.name}</span>
@@ -86,7 +86,7 @@ export function DraftsPanel() {
                 type="button"
                 aria-label={`Delete ${d.name}`}
                 onClick={() => removeDraft(d.id)}
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-text-secondary opacity-0 transition-[opacity,color] hover:text-text-primary group-hover/draft:opacity-100"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-control text-text-secondary opacity-0 transition-[opacity,color] hover:text-text-primary group-hover/draft:opacity-100"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

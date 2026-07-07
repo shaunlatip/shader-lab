@@ -21,7 +21,7 @@ export function CanvasHeader() {
           spellCheck={false}
           aria-label="Draft name"
           placeholder={suggested}
-          className="min-w-0 max-w-[280px] rounded-md border border-transparent bg-transparent px-2 py-1 text-[14px] font-medium text-text-primary outline-none transition-colors placeholder:text-text-secondary hover:border-border-default focus:border-border-strong"
+          className="min-w-0 max-w-[280px] rounded-control border border-transparent bg-transparent px-2 py-1 text-[14px] font-medium text-text-primary outline-none transition-colors placeholder:text-text-secondary hover:border-border-default focus:border-border-strong"
         />
       </div>
       <div className="flex shrink-0 items-center gap-2">
