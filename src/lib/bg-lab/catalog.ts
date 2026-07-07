@@ -154,11 +154,21 @@ function glyphControls(o: {
       ],
       default: o.colorMode,
     },
-    { kind: "color", group: "characters", key: "ink", label: "Ink", default: "#1a1713", showIf: { key: "colorMode", in: ["ink"] } },
+    // Ink/paper defaults carry each family's physical identity — AND drive the
+    // ramp polarity (renderGlyph densifies toward whichever of ink/paper is
+    // brighter). Ramp styles are terminal art: light ink, dark paper, dense
+    // glyphs in highlights (ascii-magic). Shape styles are prints: dark ink,
+    // light paper, dense marks in shadow.
+    { kind: "color", group: "characters", key: "ink", label: "Ink", default: shape ? "#1a1713" : "#e9e4d8", showIf: { key: "colorMode", in: ["ink"] } },
     { kind: "slider", group: "characters", key: "charOpacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: 1 },
     { kind: "switch", group: "characters", key: "invert", label: "Invert", default: false },
 
     // --- Intensity: how the image maps onto the grid ---
+    // Auto contrast: percentile histogram stretch of the cell-luma grid so any
+    // source uses the full glyph ramp (low-contrast photos otherwise cluster in
+    // 2–3 ramp steps and read flat — the single biggest ascii-magic-parity
+    // lever). New param: op fallback is false so old stacks are untouched.
+    { kind: "switch", group: "intensity", key: "autoContrast", label: "Auto contrast", default: true },
     { kind: "slider", group: "intensity", key: "coverage", label: "Coverage", min: 0, max: 1, step: 0.01, default: 1 },
     { kind: "slider", group: "intensity", key: "density", label: "Density", min: 0.5, max: 1.8, step: 0.05, default: 1 },
     { kind: "slider", group: "intensity", key: "edgeEmphasis", label: "Edge emphasis", min: 0, max: 1, step: 0.01, default: 0 },
@@ -177,18 +187,19 @@ function glyphControls(o: {
         { value: "blurred", label: "blurred image" },
         { value: "transparent", label: "transparent" },
       ],
-      // Ramp styles (ASCII/block/mixed): default to a *blurred* copy of the source
-      // behind the dense glyphs — "based on the image", matching ascii-magic. Shape
-      // styles (dots/diamond/lines — sizeByBrightness): default to flat *paper*,
-      // because sparse source-coloured shapes drawn over the same (blurred) photo
-      // camouflage into it and read as nearly invisible.
-      default: o.sizeByBrightness ? "paper" : "blurred",
+      // Both families default to flat paper — glyphs/marks drawn in source
+      // color over the source image (even blurred) camouflage into it and read
+      // as nearly invisible; verified side-by-side in the defaults audit.
+      // Ramp styles sit on dark terminal paper (ascii-magic: bright glyphs on
+      // black), shape styles on light print paper (ink on paper).
+      default: "paper",
     },
     { kind: "slider", group: "background", key: "bgBlur", label: "Blur", min: 0, max: 40, step: 0.5, default: 8, unit: true, showIf: { key: "background", in: ["blurred"] } },
-    // Physical-media default: light paper, dark marks — prints are ink on
-    // paper, not glow on a void. (Was #16140f dark; flipped in the defaults
-    // audit. Existing configs carry their own snapshot and are unaffected.)
-    { kind: "color", group: "background", key: "paper", label: "Paper", default: "#f1ece4", showIf: { key: "background", in: ["paper"] } },
+    // Physical-media default for shape styles: light paper, dark marks —
+    // prints are ink on paper, not glow on a void. Ramp styles keep the dark
+    // terminal paper (their background defaults to the blurred image anyway).
+    // Existing configs carry their own snapshots and are unaffected.
+    { kind: "color", group: "background", key: "paper", label: "Paper", default: shape ? "#f1ece4" : "#16140f", showIf: { key: "background", in: ["paper"] } },
 
     // --- Advanced: rarely touched / style-identity knobs ---
     {
@@ -581,6 +592,10 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
     controls: [
       { kind: "slider", group: "characters", key: "cell", label: "Dot size", min: 1.5, max: 14, step: 0.5, default: 4, unit: true },
       { kind: "slider", group: "characters", key: "threshold", label: "Threshold", min: 0, max: 1, step: 0.01, default: 0.5 },
+      // Error diffusion across the dot lattice (Floyd–Steinberg, serpentine)
+      // instead of a hard threshold — braille embossers dither for tone.
+      // New param: op fallback is false so old stacks are untouched.
+      { kind: "switch", group: "characters", key: "dither", label: "Dither", default: true },
       { kind: "slider", group: "characters", key: "charOpacity", label: "Char opacity", min: 0, max: 1, step: 0.01, default: 1 },
       { kind: "switch", group: "characters", key: "invert", label: "Invert", default: false },
       {
@@ -594,7 +609,9 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
           { value: "blurred", label: "blurred image" },
           { value: "transparent", label: "transparent" },
         ],
-        default: "blurred",
+        // Flat dark paper, same rationale as the glyph family: dots over the
+        // source image camouflage into it.
+        default: "paper",
       },
       { kind: "slider", group: "background", key: "bgBlur", label: "Blur", min: 0, max: 40, step: 0.5, default: 8, unit: true, showIf: { key: "background", in: ["blurred"] } },
       {
@@ -608,8 +625,8 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
         ],
         default: "source",
       },
-      { kind: "color", group: "advanced", key: "ink", label: "Ink", default: "#1a1713", showIf: { key: "colorMode", in: ["ink"] } },
-      { kind: "color", group: "advanced", key: "paper", label: "Paper", default: "#f1ece4", showIf: { key: "background", in: ["paper"] } },
+      { kind: "color", group: "advanced", key: "ink", label: "Ink", default: "#e9e4d8", showIf: { key: "colorMode", in: ["ink"] } },
+      { kind: "color", group: "advanced", key: "paper", label: "Paper", default: "#16140f", showIf: { key: "background", in: ["paper"] } },
     ],
   },
   mosaic: {

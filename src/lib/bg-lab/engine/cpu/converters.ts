@@ -96,6 +96,18 @@ export const renderGlyph: Op = (canvas, p, u) => {
     l = clamp(Math.pow(l, contrast) + brightness, 0, 1);
     lumA[k] = l;
   }
+  // Auto contrast: stretch the 2nd–98th percentile of the cell-luma histogram
+  // to 0..1 so every source spans the full glyph ramp. Off (fallback) for
+  // stacks saved before the param existed — their output must not change.
+  if (pb(p, "autoContrast", false)) {
+    const sorted = Float32Array.from(lumA).sort();
+    const lo = sorted[Math.floor((sorted.length - 1) * 0.02)];
+    const hi = sorted[Math.floor((sorted.length - 1) * 0.98)];
+    const span = hi - lo;
+    if (span > 1e-4) {
+      for (let k = 0; k < lumA.length; k++) lumA[k] = clamp((lumA[k] - lo) / span, 0, 1);
+    }
+  }
   const edgeAt = (c: number, r: number) => {
     if (edgeAmt <= 0) return 0;
     const at = (cc: number, rr: number) => lumA[clamp(rr, 0, rows - 1) * cols + clamp(cc, 0, cols - 1)];
@@ -236,17 +248,60 @@ export const braille: Op = (canvas, p, u) => {
   ctx.textBaseline = "middle";
   ctx.font = `${cellH}px ui-monospace, monospace`;
   const dotCols = cols * 2;
+  const dotRows = rows * 4;
+
+  // Per-dot "ink demand" (0..1) in raised-dot polarity, so tone mapping and
+  // dithering share one scale regardless of ink/paper/invert. The cut point
+  // maps the legacy threshold semantics into demand space per polarity:
+  // brightDense on⟺lum>=threshold⟺demand>=threshold; darkDense
+  // on⟺lum<threshold⟺demand>1-threshold.
+  const demand = new Float32Array(dotCols * dotRows);
+  for (let y = 0; y < dotRows; y++) {
+    for (let x = 0; x < dotCols; x++) {
+      const i = (y * dotCols + x) * 4;
+      const lum = luma601(dots[i], dots[i + 1], dots[i + 2]) / 255;
+      let d = brightDense ? lum : 1 - lum;
+      if (invert) d = 1 - d;
+      demand[y * dotCols + x] = d;
+    }
+  }
+  const cut = brightDense !== invert ? threshold : 1 - threshold;
+
+  // Error diffusion (Floyd–Steinberg, serpentine) across the dot lattice —
+  // braille embossers dither for tone; a hard threshold posterizes. Off
+  // (fallback) for stacks saved before the param existed.
+  const on = new Uint8Array(dotCols * dotRows);
+  if (pb(p, "dither", false)) {
+    const buf = Float32Array.from(demand);
+    for (let y = 0; y < dotRows; y++) {
+      const ltr = y % 2 === 0;
+      for (let step = 0; step < dotCols; step++) {
+        const x = ltr ? step : dotCols - 1 - step;
+        const k = y * dotCols + x;
+        const v = buf[k];
+        const o = v >= cut ? 1 : 0;
+        on[k] = o;
+        const err = v - (o ? 1 : 0);
+        const xf = ltr ? x + 1 : x - 1;
+        const xb = ltr ? x - 1 : x + 1;
+        if (xf >= 0 && xf < dotCols) buf[y * dotCols + xf] += err * (7 / 16);
+        if (y + 1 < dotRows) {
+          if (xb >= 0 && xb < dotCols) buf[(y + 1) * dotCols + xb] += err * (3 / 16);
+          buf[(y + 1) * dotCols + x] += err * (5 / 16);
+          if (xf >= 0 && xf < dotCols) buf[(y + 1) * dotCols + xf] += err * (1 / 16);
+        }
+      }
+    }
+  } else {
+    for (let k = 0; k < demand.length; k++) on[k] = demand[k] >= cut ? 1 : 0;
+  }
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       let bits = 0;
       for (let dx = 0; dx < 2; dx++) {
         for (let dy = 0; dy < 4; dy++) {
-          const i = ((r * 4 + dy) * dotCols + (c * 2 + dx)) * 4;
-          const lum = luma601(dots[i], dots[i + 1], dots[i + 2]) / 255;
-          // raise dots where the glyph reads as "present" against the paper
-          let on = brightDense ? lum >= threshold : lum < threshold;
-          if (invert) on = !on;
-          if (on) bits |= BRAILLE_BIT[dx][dy];
+          if (on[(r * 4 + dy) * dotCols + (c * 2 + dx)]) bits |= BRAILLE_BIT[dx][dy];
         }
       }
       if (bits === 0) continue;

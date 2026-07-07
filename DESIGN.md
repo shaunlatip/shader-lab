@@ -66,11 +66,11 @@ Catalog safety rules (also in catalog.ts): never rename/delete a param key, `hid
 
 | Effect | Physical ideal | Change |
 |---|---|---|
-| ascii, blockChars, mixed ("ramp" family) | ascii-magic terminal art over a receded image | Kept blurred-image background; fontScale + colorMode promoted out of Advanced into Characters; blendMode/dotGrid demoted to Advanced |
-| crosshatch, diagonal, lines ("shape") | Engraving/etching: dark strokes on light paper, denser in shadow | Group renamed "Strokes"; charSet/glyphs hidden (identity, not a knob); paper flipped #16140f → #f1ece4, ink #e9e4d8 → #1a1713; Mark scale + Color promoted |
+| ascii, blockChars, mixed ("ramp" family) | ascii-magic terminal art: bright glyphs on black | Background default blurred → paper (dark #16140f; source-colored glyphs over the source image camouflage — verified side-by-side); light ink kept (drives bright-dense ramp polarity); fontScale + colorMode promoted into Characters; blendMode/dotGrid demoted; NEW autoContrast (default on, engine fallback off) percentile-stretches cell luma so any photo spans the full ramp |
+| crosshatch, diagonal, lines ("shape") | Engraving/etching: dark strokes on light paper, denser in shadow | Group renamed "Strokes"; charSet/glyphs hidden (identity, not a knob); paper #16140f → #f1ece4, ink #e9e4d8 → #1a1713; Mark scale + Color promoted; autoContrast as above |
 | diamond ("shape") | Jewel-print marks on paper | Same as above; group "Marks" |
 | glyphDots ("shape") | Halftone-print dots on paper (Leuchtturm dot-grid density feel) | Same as above; group "Dots" |
-| braille | Embossed paper dots | ink/paper flipped light |
+| braille | Embossed dots; embossers dither for tone | Background → paper; NEW dither switch (Floyd–Steinberg serpentine across the dot lattice, default on, engine fallback off) replaces hard-threshold posterization |
 | halftone | Newsprint screening | Already light paper #f1ece4 / dark ink; CMYK mode gets true screen angles in the engine pass (C15/M75/Y0/K45) |
 | dither | 1-bit print/riso dithers | Defaults sound (bayer4, colour); quality work in engine pass |
 | lineArt | Ink drawing | Already ink #16140f on paper #f1ece4 |
