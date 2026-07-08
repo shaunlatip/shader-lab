@@ -144,7 +144,50 @@ export async function randomPexelsId(kind: "photo" | "video" = "photo"): Promise
 // source and output are always kept. Slugs are stable — they name the
 // pre-rendered thumbnails in /public/presets/.
 export const PRESETS: Preset[] = [
+  // ---------------------------------------------------------------- Paint
+  // maximeheckel-adjacent painterly/structural effects lead the gallery:
+  // Kuwahara first, then line art.
+  {
+    slug: "oil-paint",
+    name: "Oil paint",
+    category: "Paint",
+    curated: true,
+    build: () => [withParams("kuwahara", { quality: "smooth", radius: 6 }), withParams("adjust", { saturation: 1.15, contrast: 1.05 })],
+  },
+  {
+    slug: "ink-sketch",
+    name: "Ink sketch",
+    category: "Paint",
+    curated: true,
+    build: () => [withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }), withParams("grain", { amount: 0.06 })],
+  },
+  {
+    slug: "brushwork",
+    name: "Brushwork",
+    category: "Paint",
+    build: () => [
+      withParams("kuwahara", { quality: "anisotropic", radius: 7, anisotropy: 1.6 }),
+      withParams("adjust", { saturation: 1.15 }),
+      withParams("grain", { amount: 0.06 }),
+    ],
+  },
+
   // ---------------------------------------------------------------- Print
+  // Dither, dots, halftone — in that priority order.
+  {
+    slug: "floyd-dither",
+    name: "Floyd dither",
+    category: "Print",
+    curated: true,
+    build: () => [withParams("dither", { type: "floydSteinberg", levels: 2, mono: true })],
+  },
+  {
+    slug: "halftone-dots",
+    name: "Halftone dots",
+    category: "Print",
+    curated: true,
+    build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
+  },
   {
     slug: "newsprint",
     name: "Newsprint",
@@ -171,25 +214,11 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
-    slug: "floyd-dither",
-    name: "Floyd dither",
-    category: "Print",
-    curated: true,
-    build: () => [withParams("dither", { type: "floydSteinberg", levels: 2, mono: true })],
-  },
-  {
     slug: "crosshatch",
     name: "Crosshatch",
     category: "Print",
     curated: true,
     build: () => [makeEffect("grayscale"), withParams("crosshatch", { cell: 9 })],
-  },
-  {
-    slug: "halftone-dots",
-    name: "Halftone dots",
-    category: "Print",
-    curated: true,
-    build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
   },
   {
     slug: "gooey-halftone",
@@ -240,6 +269,121 @@ export const PRESETS: Preset[] = [
     build: () => [makeEffect("grayscale"), withParams("diagonal", { cell: 9 })],
   },
 
+  // ---------------------------------------------------------------- Glitch
+  // Mosaic leads — the last of the explicitly prioritized effects.
+  {
+    slug: "mosaic-tiles",
+    name: "Mosaic tiles",
+    category: "Glitch",
+    curated: true,
+    build: () => [withParams("mosaic", { size: 22, gap: 0.12 })],
+  },
+  {
+    slug: "vhs-glitch",
+    name: "VHS glitch",
+    category: "Glitch",
+    curated: true,
+    build: () => [
+      withParams("chromatic", { amount: 4, mode: "split" }),
+      withParams("glitch", { amount: 0.45 }),
+      withParams("scanlines", { spacing: 3, intensity: 0.3 }),
+      withParams("filmDust", { amount: 0.25 }),
+    ],
+  },
+  {
+    slug: "crt-curve",
+    name: "CRT curve",
+    category: "Glitch",
+    curated: true,
+    build: () => [
+      withParams("scanlines", { spacing: 3, intensity: 0.35 }),
+      withParams("crtCurvature", { amount: 0.3, edge: 0.4 }),
+      withParams("vignette", { amount: 0.5 }),
+    ],
+  },
+  {
+    slug: "chromatic",
+    name: "Chromatic",
+    category: "Glitch",
+    build: () => [withParams("chromatic", { amount: 8 }), withParams("grain", { amount: 0.12 })],
+  },
+  {
+    slug: "dispersion",
+    name: "Dispersion",
+    category: "Glitch",
+    build: () => [withParams("chromatic", { amount: 8, samples: 8, quality: "high" }), withParams("grain", { amount: 0.08 })],
+  },
+  {
+    slug: "vaporwave",
+    name: "Vaporwave",
+    category: "Glitch",
+    build: () => [
+      withParams("chromatic", { amount: 6, mode: "split" }),
+      withParams("scanlines", { spacing: 4, intensity: 0.3 }),
+      withParams("gradientMap", {
+        stops: [
+          { t: 0, color: "#2b0a4e" },
+          { t: 0.5, color: "#e83fb8" },
+          { t: 1, color: "#7df9ff" },
+        ],
+        amount: 0.75,
+      }),
+      withParams("grain", { amount: 0.12 }),
+    ],
+  },
+  {
+    slug: "scanlines-rgb",
+    name: "Scanlines RGB",
+    category: "Glitch",
+    build: () => [withParams("scanlines", { spacing: 6, intensity: 0.6, rgbCells: true })],
+  },
+  {
+    slug: "sine-warp",
+    name: "Sine warp",
+    category: "Glitch",
+    build: () => [withParams("displace", { amount: 30, scale: 4, type: "sine" })],
+  },
+  {
+    slug: "warp",
+    name: "Warp",
+    category: "Glitch",
+    build: () => [withParams("displace", { amount: 24, scale: 4 }), makeEffect("grayscale")],
+  },
+  {
+    slug: "pixel-grain",
+    name: "Pixel + grain",
+    category: "Glitch",
+    build: () => [withParams("pixelate", { size: 14 }), withParams("grain", { amount: 0.18 })],
+  },
+  {
+    slug: "pixel-dots",
+    name: "Pixel dots",
+    category: "Glitch",
+    build: () => [withParams("pixelate", { size: 22, shape: "circle" }), withParams("grain", { amount: 0.12 })],
+  },
+  {
+    slug: "pixel-diamonds",
+    name: "Pixel diamonds",
+    category: "Glitch",
+    build: () => [withParams("pixelate", { size: 24, shape: "diamond" })],
+  },
+  {
+    slug: "lego",
+    name: "LEGO",
+    category: "Glitch",
+    build: () => [withParams("lego", { size: 24 })],
+  },
+  {
+    slug: "crt",
+    name: "CRT",
+    category: "Glitch",
+    build: () => [
+      withParams("scanlines", { spacing: 3, intensity: 0.4 }),
+      withParams("chromatic", { amount: 3 }),
+      withParams("vignette", { amount: 0.5 }),
+    ],
+  },
+
   // ---------------------------------------------------------------- Text
   {
     slug: "ascii-art",
@@ -281,32 +425,6 @@ export const PRESETS: Preset[] = [
     name: "Rain lines",
     category: "Text",
     build: () => [withParams("lines", { cell: 7 })],
-  },
-
-  // ---------------------------------------------------------------- Paint
-  {
-    slug: "oil-paint",
-    name: "Oil paint",
-    category: "Paint",
-    curated: true,
-    build: () => [withParams("kuwahara", { quality: "smooth", radius: 6 }), withParams("adjust", { saturation: 1.15, contrast: 1.05 })],
-  },
-  {
-    slug: "ink-sketch",
-    name: "Ink sketch",
-    category: "Paint",
-    curated: true,
-    build: () => [withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }), withParams("grain", { amount: 0.06 })],
-  },
-  {
-    slug: "brushwork",
-    name: "Brushwork",
-    category: "Paint",
-    build: () => [
-      withParams("kuwahara", { quality: "anisotropic", radius: 7, anisotropy: 1.6 }),
-      withParams("adjust", { saturation: 1.15 }),
-      withParams("grain", { amount: 0.06 }),
-    ],
   },
 
   // ---------------------------------------------------------------- Film
@@ -446,120 +564,9 @@ export const PRESETS: Preset[] = [
     category: "Grade",
     build: () => [withParams("posterize", { levels: 5, perChannel: true }), withParams("adjust", { saturation: 1.4, contrast: 1.1 })],
   },
-
-  // ---------------------------------------------------------------- Glitch
-  {
-    slug: "vhs-glitch",
-    name: "VHS glitch",
-    category: "Glitch",
-    curated: true,
-    build: () => [
-      withParams("chromatic", { amount: 4, mode: "split" }),
-      withParams("glitch", { amount: 0.45 }),
-      withParams("scanlines", { spacing: 3, intensity: 0.3 }),
-      withParams("filmDust", { amount: 0.25 }),
-    ],
-  },
-  {
-    slug: "crt-curve",
-    name: "CRT curve",
-    category: "Glitch",
-    curated: true,
-    build: () => [
-      withParams("scanlines", { spacing: 3, intensity: 0.35 }),
-      withParams("crtCurvature", { amount: 0.3, edge: 0.4 }),
-      withParams("vignette", { amount: 0.5 }),
-    ],
-  },
-  {
-    slug: "chromatic",
-    name: "Chromatic",
-    category: "Glitch",
-    build: () => [withParams("chromatic", { amount: 8 }), withParams("grain", { amount: 0.12 })],
-  },
-  {
-    slug: "dispersion",
-    name: "Dispersion",
-    category: "Glitch",
-    build: () => [withParams("chromatic", { amount: 8, samples: 8, quality: "high" }), withParams("grain", { amount: 0.08 })],
-  },
-  {
-    slug: "vaporwave",
-    name: "Vaporwave",
-    category: "Glitch",
-    build: () => [
-      withParams("chromatic", { amount: 6, mode: "split" }),
-      withParams("scanlines", { spacing: 4, intensity: 0.3 }),
-      withParams("gradientMap", {
-        stops: [
-          { t: 0, color: "#2b0a4e" },
-          { t: 0.5, color: "#e83fb8" },
-          { t: 1, color: "#7df9ff" },
-        ],
-        amount: 0.75,
-      }),
-      withParams("grain", { amount: 0.12 }),
-    ],
-  },
-  {
-    slug: "scanlines-rgb",
-    name: "Scanlines RGB",
-    category: "Glitch",
-    build: () => [withParams("scanlines", { spacing: 6, intensity: 0.6, rgbCells: true })],
-  },
-  {
-    slug: "sine-warp",
-    name: "Sine warp",
-    category: "Glitch",
-    build: () => [withParams("displace", { amount: 30, scale: 4, type: "sine" })],
-  },
-  {
-    slug: "warp",
-    name: "Warp",
-    category: "Glitch",
-    build: () => [withParams("displace", { amount: 24, scale: 4 }), makeEffect("grayscale")],
-  },
-  {
-    slug: "pixel-grain",
-    name: "Pixel + grain",
-    category: "Glitch",
-    build: () => [withParams("pixelate", { size: 14 }), withParams("grain", { amount: 0.18 })],
-  },
-  {
-    slug: "pixel-dots",
-    name: "Pixel dots",
-    category: "Glitch",
-    build: () => [withParams("pixelate", { size: 22, shape: "circle" }), withParams("grain", { amount: 0.12 })],
-  },
-  {
-    slug: "pixel-diamonds",
-    name: "Pixel diamonds",
-    category: "Glitch",
-    build: () => [withParams("pixelate", { size: 24, shape: "diamond" })],
-  },
-  {
-    slug: "mosaic-tiles",
-    name: "Mosaic tiles",
-    category: "Glitch",
-    build: () => [withParams("mosaic", { size: 22, gap: 0.12 })],
-  },
-  {
-    slug: "lego",
-    name: "LEGO",
-    category: "Glitch",
-    build: () => [withParams("lego", { size: 24 })],
-  },
-  {
-    slug: "crt",
-    name: "CRT",
-    category: "Glitch",
-    build: () => [
-      withParams("scanlines", { spacing: 3, intensity: 0.4 }),
-      withParams("chromatic", { amount: 3 }),
-      withParams("vignette", { amount: 0.5 }),
-    ],
-  },
 ];
 
 export const CURATED_PRESETS = PRESETS.filter((p) => p.curated);
-export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Print", "Text", "Paint", "Film", "Grade", "Glitch"];
+// Priority order per the maximeheckel-style effects: Paint (Kuwahara, line
+// art) leads, then Print (dither/dots/halftone), then Glitch (mosaic).
+export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Paint", "Print", "Glitch", "Text", "Film", "Grade"];
