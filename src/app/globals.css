@@ -314,6 +314,9 @@ html:has(#intro-root[data-phase="reveal"]) {
      reads as prose. The test: if copying the text verbatim into a terminal would mean the
      same thing, mono works. If not, sans. See CLAUDE.md § Mono accent. */
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* Geist Pixel (Square cut) — the app wordmark only ("shaderlab" in the
+     header). Drives the `font-pixel` utility. */
+  --font-pixel: var(--font-geist-pixel-square), var(--font-geist-mono), ui-monospace, monospace;
 
   /* --- Font weights ---
      Switzer is a variable font, so any weight in 100–900 is a real cut.
@@ -1178,4 +1181,5 @@ body {
   --font-nagel: var(--font-cabinet-grotesk), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   --font-serif: Georgia, "Times New Roman", serif;
+  --font-pixel: var(--font-geist-pixel-square), var(--font-geist-mono), ui-monospace, monospace;
 }

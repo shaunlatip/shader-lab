@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
+import { GeistPixelSquare } from "geist/font/pixel";
 import localFont from "next/font/local";
 import Providers from "./providers";
 import "./globals.css";
 
 // Fonts the lab UI uses: font-lab (General Sans, UI/body), font-nagel
-// (Cabinet Grotesk, display/titles), font-mono (Geist Mono, values). The
-// Fontshare variable files are self-hosted in src/fonts (FFL license there);
-// the @theme tokens in globals.css read these CSS variables. The engine's
-// glyph rendering uses ui-monospace and is intentionally decoupled from UI
-// fonts — export output must not change when the chrome typeface does.
+// (Cabinet Grotesk, display/titles), font-mono (Geist Mono, values), font-pixel
+// (Geist Pixel Square, the "shaderlab" wordmark only). The Fontshare variable
+// files are self-hosted in src/fonts (FFL license there); Geist Pixel ships
+// with the `geist` npm package (SIL license). The @theme tokens in globals.css
+// read these CSS variables. The engine's glyph rendering uses ui-monospace
+// and is intentionally decoupled from UI fonts — export output must not
+// change when the chrome typeface does.
 const generalSans = localFont({
   src: "../fonts/GeneralSans-Variable.woff2",
   variable: "--font-general-sans",
@@ -23,9 +26,10 @@ const cabinetGrotesk = localFont({
   display: "swap",
 });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+// The header wordmark's `font-pixel` face — Vercel's Geist Pixel (Square cut).
 
 export const metadata: Metadata = {
-  title: "Shader Lab — image effects studio",
+  title: "shaderlab — image effects studio",
   description:
     "A studio for layered image effects — pixelate, dither, halftone, gradient maps, grain and more. Stack, reorder, and export.",
 };
@@ -55,7 +59,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${generalSans.variable} ${cabinetGrotesk.variable} ${geistMono.variable} antialiased`}
+        className={`${generalSans.variable} ${cabinetGrotesk.variable} ${geistMono.variable} ${GeistPixelSquare.variable} antialiased`}
       >
         <Providers>{children}</Providers>
       </body>

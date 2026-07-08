@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="40px" height="40px" viewBox="0 0 24 24">
+  <path d="M12 2.01001L12 2.00001" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M9 19.01L9 19" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M15 19.01L15 19" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M4 12.01L4 12" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M20 12.01L20 12" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M4 17V21H7" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M20 17V21H17" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M11 17H13" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M8 8H2V10" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M16 8L22 8V10" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M18 14V15" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M6 14V15" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M14 4V6" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+  <path d="M10 4V6" stroke="#1C1F21" stroke-width="2" stroke-linecap="square" fill="none"></path>
+</svg>
