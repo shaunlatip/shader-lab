@@ -2,7 +2,7 @@
 
 import { nanoid } from "nanoid";
 import { defaultParams } from "./catalog";
-import type { BgConfig, Effect, EffectType, ParamValue, SourceState } from "./types";
+import type { BgConfig, Effect, EffectType, ParamValue } from "./types";
 
 export interface GalleryImage {
   id: string;
@@ -83,7 +83,7 @@ export function makeDefaultConfig(): BgConfig {
   };
 }
 
-export type PresetCategory = "Print" | "Text" | "Paint" | "Film" | "Grade" | "Glitch" | "Scene";
+export type PresetCategory = "Print" | "Text" | "Paint" | "Film" | "Grade" | "Glitch";
 
 export interface Preset {
   /** Stable key — names the pre-rendered thumbnail at /presets/<slug>.webp. */
@@ -93,10 +93,10 @@ export interface Preset {
   /** Heroes appear as thumbnail cards in the gallery; the rest live behind
    * the all-presets search. */
   curated?: boolean;
-  /** Optional source the preset carries (generative-source looks — clouds,
-   * caustics, sky). Merged into the current source on apply; presets without
-   * it keep the user's source, as before. */
-  source?: Partial<SourceState>;
+  /** Presets only ever touch the effect stack, never the source — generative
+   * looks (clouds/caustics/sky) live as Pattern-panel chips in the left
+   * panel instead, so browsing/shuffling presets can never change what's
+   * behind the effects. */
   build: () => Effect[];
 }
 
@@ -140,9 +140,9 @@ export async function randomPexelsId(kind: "photo" | "video" = "photo"): Promise
 
 // The preset library. Curated heroes render as thumbnail cards in the
 // gallery (grouped by category); the rest are reachable through the
-// all-presets search. Applying a preset replaces the current stack
-// (source + output are kept, unless the preset carries a `source`).
-// Slugs are stable — they name the pre-rendered thumbnails in /public/presets/.
+// all-presets search. Applying a preset replaces the current stack only —
+// source and output are always kept. Slugs are stable — they name the
+// pre-rendered thumbnails in /public/presets/.
 export const PRESETS: Preset[] = [
   // ---------------------------------------------------------------- Print
   {
@@ -559,43 +559,7 @@ export const PRESETS: Preset[] = [
       withParams("vignette", { amount: 0.5 }),
     ],
   },
-
-  // ---------------------------------------------------------------- Scene
-  // Generative-source looks — these carry a `source` (clouds/caustics/sky
-  // pattern) and replace it on apply, unlike every preset above.
-  {
-    slug: "storybook-clouds",
-    name: "Storybook clouds",
-    category: "Scene",
-    curated: true,
-    source: {
-      mode: "pattern",
-      pattern: { type: "clouds", cell: 22, weight: 0.5, jitter: 0.35, angle: 35, stagger: false, fg: "#f7f2e8", bg: "#8fb8d8" },
-    },
-    build: () => [withParams("grain", { amount: 0.1 }), withParams("vignette", { amount: 0.25 })],
-  },
-  {
-    slug: "poolside",
-    name: "Poolside",
-    category: "Scene",
-    curated: true,
-    source: {
-      mode: "pattern",
-      pattern: { type: "caustics", cell: 40, weight: 0.4, jitter: 0.3, angle: 0, stagger: true, fg: "#eafcff", bg: "#1f8ba8" },
-    },
-    build: () => [withParams("bloom", { intensity: 0.5, threshold: 0.6 }), withParams("tint", { color: "#9fe8f0", opacity: 0.15, blend: "screen" })],
-  },
-  {
-    slug: "sundown-sky",
-    name: "Sundown sky",
-    category: "Scene",
-    source: {
-      mode: "pattern",
-      pattern: { type: "sky", cell: 36, weight: 0.6, jitter: 0.35, angle: 25, stagger: false, fg: "#f2a65a", bg: "#2d4a7a" },
-    },
-    build: () => [withParams("grain", { amount: 0.08 })],
-  },
 ];
 
 export const CURATED_PRESETS = PRESETS.filter((p) => p.curated);
-export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Print", "Text", "Paint", "Film", "Grade", "Glitch", "Scene"];
+export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Print", "Text", "Paint", "Film", "Grade", "Glitch"];

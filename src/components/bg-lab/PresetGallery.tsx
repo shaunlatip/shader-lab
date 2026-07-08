@@ -96,9 +96,7 @@ export function PresetGallery() {
   );
 
   function apply(preset: Preset) {
-    // Scene presets carry their own generative source (clouds/caustics/sky);
-    // everything else keeps the user's current source.
-    applyStack(preset.build(), preset.source);
+    applyStack(preset.build());
     toast.success(preset.name);
   }
   function shuffle() {

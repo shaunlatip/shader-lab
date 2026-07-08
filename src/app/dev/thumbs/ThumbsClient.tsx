@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CpuEngine } from "@/lib/bg-lab/engine/cpu/cpuEngine";
-import { DEFAULT_PATTERN } from "@/lib/bg-lab/patternCatalog";
 import { PRESETS } from "@/lib/bg-lab/presets";
 import type { BgConfig } from "@/lib/bg-lab/types";
 
@@ -11,10 +10,9 @@ const H = 427; // 3:2, matches the app's default aspect
 const FALLBACK_REFERENCE = "/presets/_reference.png";
 
 // One reference photo PER PRESET (Figma shader-panel style: every card gets
-// its own subject, chosen to show the effect off — b&w street for newsprint,
-// a giraffe's spots for halftone rings, neon for the glitch family). Values
-// are Pexels photo ids; the CDN render URL is built below. Scene presets are
-// absent on purpose — they render their own generative pattern source.
+// its own subject, chosen to show the effect off — abstract/nature/landscape
+// subjects, museum-poster register, no people). Values are Pexels photo ids;
+// the CDN render URL is built below.
 const PEXELS_REF: Record<string, string> = {
   // Print
   newsprint: "22243358", // b&w market crowd
@@ -119,17 +117,11 @@ export default function ThumbsClient() {
             source: { mode: "image", imageId: "reference", solidColor: "#cdd9e0" },
             stack: preset.build(),
           };
-          if (preset.source?.mode === "pattern" && preset.source.pattern) {
-            // Scene presets carry their own generative source.
-            config.source = { mode: "pattern", imageId: null, solidColor: "#cdd9e0", pattern: preset.source.pattern };
-            engine.setSource({ kind: "pattern", pattern: preset.source.pattern ?? DEFAULT_PATTERN });
-          } else {
-            // No silent fallback for mapped refs — a CDN miss must surface as
-            // an ✗ row, not quietly render the shared reference image.
-            const refId = PEXELS_REF[preset.slug];
-            const img = refId ? await loadImage(pexelsUrl(refId)) : fallback;
-            engine.setSource({ kind: "image", image: img });
-          }
+          // No silent fallback for mapped refs — a CDN miss must surface as
+          // an ✗ row, not quietly render the shared reference image.
+          const refId = PEXELS_REF[preset.slug];
+          const img = refId ? await loadImage(pexelsUrl(refId)) : fallback;
+          engine.setSource({ kind: "image", image: img });
           engine.render(canvas, config, { W, H });
           const dataUrl = canvas.toDataURL("image/webp", 0.9);
           const res = await fetch("/api/dev/thumbs", {
