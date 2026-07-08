@@ -26,6 +26,8 @@ export const PATTERN_TYPE_LABEL: Record<PatternType, string> = {
   lineGrid: "Line grid",
   graph: "Graph paper",
   plusGrid: "Plus grid",
+  xGrid: "X grid",
+  cuttingMat: "Cutting mat",
   halftoneGradient: "Halftone ramp",
   checker: "Checker",
   stripes: "Stripes",
@@ -69,9 +71,12 @@ export const PATTERN_CONTROLS: ControlSpec[] = [
     kind: "slider",
     key: "weight",
     label: "Weight",
-    min: 0.05,
+    // Floor down near zero — every draw already clamps stroke/dot size to a
+    // 1px minimum, so raising the slider's own floor just made a true
+    // hairline unreachable at larger cell sizes.
+    min: 0.01,
     max: 0.95,
-    step: 0.01,
+    step: 0.005,
     default: DEFAULT_PATTERN.weight,
   },
   {

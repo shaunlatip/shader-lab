@@ -86,6 +86,8 @@ export const PATTERN_TYPES = [
   "rings",
   "iso",
   "plusGrid",
+  "xGrid",
+  "cuttingMat",
   "halftoneGradient",
   "moire",
   "hex",

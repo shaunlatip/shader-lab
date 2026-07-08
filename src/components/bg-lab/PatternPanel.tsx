@@ -6,6 +6,7 @@ import { DEFAULT_PATTERN } from "@/lib/bg-lab/patternCatalog";
 import { cn } from "@/lib/utils";
 import { useBgLab } from "./BgLabProvider";
 import { ControlRow } from "./controls/ControlRow";
+import { RotationDial } from "./controls/RotationDial";
 import { IconTip, SectionHeader } from "./panel";
 
 const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
@@ -13,6 +14,8 @@ const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
   { value: "graph", label: "Graph paper" },
   { value: "lineGrid", label: "Line grid" },
   { value: "plusGrid", label: "Plus grid" },
+  { value: "xGrid", label: "X grid" },
+  { value: "cuttingMat", label: "Cutting mat" },
   { value: "halftoneGradient", label: "Halftone ramp" },
   { value: "stripes", label: "Stripes" },
   { value: "waves", label: "Waves" },
@@ -32,16 +35,21 @@ const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
 // Controls only render for the types they affect — Angle on a dot grid or
 // Stagger on rings were dead knobs that made the panel read untrustworthy.
 // Generative fields repurpose knobs (see each draw's doc comment); they're
-// listed here under whichever knob they actually read.
+// listed here under whichever knob they actually read. Cutting mat spins as
+// one rigid design on Angle (grid + registration marks together) but ignores
+// jitter/stagger — only cell/weight/angle/ink apply.
 const APPLIES: Partial<Record<string, PatternType[]>> = {
-  angle: ["stripes", "waves", "halftoneGradient", "moire", "fbm", "clouds", "sky", "caustics"],
-  jitter: ["dotGrid", "iso", "plusGrid", "moire", "fbm", "clouds", "sky", "caustics"],
+  angle: ["stripes", "waves", "halftoneGradient", "moire", "fbm", "clouds", "sky", "caustics", "cuttingMat"],
+  jitter: ["dotGrid", "iso", "plusGrid", "xGrid", "moire", "fbm", "clouds", "sky", "caustics"],
   stagger: ["dotGrid", "halftoneGradient", "voronoi", "caustics"],
 };
 
 const GEOMETRY: ControlSpec[] = [
   { kind: "slider", key: "cell", label: "Cell size", min: 4, max: 120, step: 1, default: DEFAULT_PATTERN.cell, unit: true },
-  { kind: "slider", key: "weight", label: "Weight", min: 0.05, max: 0.95, step: 0.01, default: DEFAULT_PATTERN.weight },
+  // Floored near zero, not at 0.05 — every draw already clamps stroke/dot
+  // size to a 1px minimum, so the old floor made a true hairline unreachable
+  // at larger cell sizes.
+  { kind: "slider", key: "weight", label: "Weight", min: 0.01, max: 0.95, step: 0.005, default: DEFAULT_PATTERN.weight },
   { kind: "slider", key: "angle", label: "Angle", min: -180, max: 180, step: 1, default: DEFAULT_PATTERN.angle },
   { kind: "slider", key: "jitter", label: "Jitter", min: 0, max: 0.5, step: 0.01, default: DEFAULT_PATTERN.jitter },
   { kind: "switch", key: "stagger", label: "Stagger rows", default: DEFAULT_PATTERN.stagger },
@@ -68,6 +76,14 @@ const PATTERN_PRESETS: Partial<Record<PatternType, { name: string; patch: Partia
   plusGrid: [
     { name: "Registration", patch: { cell: 64, weight: 0.24, jitter: 0, fg: "#8f8c86", bg: "#f5f4f1" } },
     { name: "Scatter", patch: { cell: 48, weight: 0.18, jitter: 0.35, fg: "#1c1b19", bg: "#efedea" } },
+  ],
+  xGrid: [
+    { name: "Registration", patch: { cell: 64, weight: 0.24, jitter: 0, fg: "#8f8c86", bg: "#f5f4f1" } },
+    { name: "Scatter", patch: { cell: 48, weight: 0.18, jitter: 0.35, fg: "#1c1b19", bg: "#efedea" } },
+  ],
+  cuttingMat: [
+    { name: "Drafting mat", patch: { cell: 24, weight: 0.15, fg: "#7a8288", bg: "#eef0f1" } },
+    { name: "Blueprint", patch: { cell: 28, weight: 0.2, fg: "#8fb0d8", bg: "#0f2540" } },
   ],
   halftoneGradient: [
     { name: "Tint ramp", patch: { cell: 14, weight: 0.5, angle: 90, stagger: true, fg: "#1c1b19", bg: "#f1ece4" } },
@@ -132,6 +148,11 @@ export function PatternPanel() {
     const gate = APPLIES[s.key];
     return !gate || gate.includes(pattern.type);
   });
+  // Angle gets its own dial column (Matte-style) instead of sitting in the
+  // linear slider stack — pulled out here so it renders beside, not among,
+  // the rest of Geometry.
+  const showDial = geometry.some((s) => s.key === "angle");
+  const linearGeometry = geometry.filter((s) => s.key !== "angle");
 
   const row = (spec: ControlSpec) => (
     <ControlRow
@@ -182,7 +203,16 @@ export function PatternPanel() {
       </div>
       <div className="flex flex-col gap-2.5 border-t border-border-default pt-2.5">
         <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Geometry</span>
-        {geometry.map(row)}
+        <div className="flex gap-3">
+          <div className="flex flex-1 flex-col gap-2.5">{linearGeometry.map(row)}</div>
+          {showDial && (
+            <RotationDial
+              value={typeof pattern.angle === "number" ? pattern.angle : 0}
+              onChange={(v) => set("angle", v)}
+              className="shrink-0 pt-1"
+            />
+          )}
+        </div>
       </div>
       <div className="flex flex-col gap-2.5 border-t border-border-default pt-2.5">
         <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Ink</span>

@@ -251,6 +251,138 @@ function drawPlusGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pa
   ctx.stroke();
 }
 
+// X marks at grid intersections — plusGrid rotated 45°, same arm length so
+// the two read as siblings at matching weight/cell.
+function drawXGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
+  const cols = Math.ceil(W / cell) + 1;
+  const rows = Math.ceil(H / cell) + 1;
+  if (cols * rows > MAX_PRIMITIVES) return;
+  const arm = p.weight * cell * 0.5 * Math.SQRT1_2;
+  const jit = p.jitter * cell * 0.5;
+  ctx.strokeStyle = p.fg;
+  ctx.lineWidth = Math.max(1, cell * 0.03);
+  ctx.beginPath();
+  for (let iy = 0; iy <= rows; iy++) {
+    for (let ix = 0; ix <= cols; ix++) {
+      const jx = jit > 0 ? (hash2(ix, iy) - 0.5) * 2 * jit : 0;
+      const jy = jit > 0 ? (hash2(ix + 9973, iy) - 0.5) * 2 * jit : 0;
+      const x = ix * cell + jx;
+      const y = iy * cell + jy;
+      ctx.moveTo(x - arm, y - arm);
+      ctx.lineTo(x + arm, y + arm);
+      ctx.moveTo(x - arm, y + arm);
+      ctx.lineTo(x + arm, y - arm);
+    }
+  }
+  ctx.stroke();
+}
+
+// Cutting mat: a drafting-mat reference grid — corner bullseyes, a
+// bottom-left sunburst, ruler ticks along the top+left edges, a small
+// circle-crosshair cluster, and corner-to-corner diagonals. Unlike every
+// other pattern here, these read as fixed registration marks printed on a
+// physical mat, so their size and position come from `u` (resolution) only —
+// never from `cell` (spacing). Only the underlying square grid reacts to
+// spacing, same as Line grid. `weight` still scales their stroke width
+// (that's "thickness", not "spacing"); `angle` spins the whole mat (grid +
+// marks together) about the canvas center, same as a physical mat rotated
+// under the material.
+function drawCuttingMat(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number, u: number) {
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate((p.angle * Math.PI) / 180);
+  ctx.translate(-W / 2, -H / 2);
+
+  drawLineGrid(ctx, W, H, p, cell);
+
+  const lw = Math.max(1, p.weight * 3 * u);
+  ctx.strokeStyle = p.fg;
+  ctx.fillStyle = p.fg;
+
+  // corner-to-corner diagonals — full canvas, always present
+  ctx.lineWidth = lw;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(W, H);
+  ctx.moveTo(W, 0);
+  ctx.lineTo(0, H);
+  ctx.stroke();
+
+  // ruler ticks along the top + left edges, fixed interval (not `cell`)
+  const tick = 32 * u;
+  const tickLen = 10 * u;
+  const tickLenMajor = 18 * u;
+  ctx.lineWidth = Math.max(1, u);
+  ctx.beginPath();
+  for (let x = 0, i = 0; x < W; x += tick, i++) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, i % 5 === 0 ? tickLenMajor : tickLen);
+  }
+  for (let y = 0, i = 0; y < H; y += tick, i++) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(i % 5 === 0 ? tickLenMajor : tickLen, y);
+  }
+  ctx.stroke();
+
+  const bullseye = (cx: number, cy: number, outerR: number, rings: number) => {
+    ctx.lineWidth = lw;
+    for (let i = 1; i <= rings; i++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, (outerR * i) / rings, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, lw * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  // top-right bullseye
+  const ringR = 46 * u;
+  const inset = 20 * u;
+  bullseye(W - ringR - inset, ringR + inset, ringR, 4);
+
+  // bottom-left bullseye + sunburst rays
+  const sunCx = ringR + inset;
+  const sunCy = H - ringR - inset;
+  bullseye(sunCx, sunCy, ringR * 0.7, 3);
+  const rayCount = 12;
+  const rayLen = ringR * 1.5;
+  ctx.lineWidth = Math.max(1, lw * 0.6);
+  ctx.beginPath();
+  for (let i = 0; i < rayCount; i++) {
+    const a = (i / rayCount) * Math.PI * 2;
+    ctx.moveTo(sunCx, sunCy);
+    ctx.lineTo(sunCx + Math.cos(a) * rayLen, sunCy + Math.sin(a) * rayLen);
+  }
+  ctx.stroke();
+
+  // mid-right circle-crosshair cluster (2 rows x 4 cols)
+  const clusterR = 13 * u;
+  const clusterGap = clusterR * 2.4;
+  const clusterCols = 4;
+  const clusterRows = 2;
+  const clusterCx = W - ringR - clusterGap * (clusterCols - 1) - inset * 0.5;
+  const clusterCy = H * 0.55;
+  ctx.lineWidth = Math.max(1, u);
+  for (let r = 0; r < clusterRows; r++) {
+    for (let c = 0; c < clusterCols; c++) {
+      const ccx = clusterCx + c * clusterGap;
+      const ccy = clusterCy + r * clusterGap;
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, clusterR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ccx - clusterR * 0.5, ccy);
+      ctx.lineTo(ccx + clusterR * 0.5, ccy);
+      ctx.moveTo(ccx, ccy - clusterR * 0.5);
+      ctx.lineTo(ccx, ccy + clusterR * 0.5);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
 // Halftone gradient: screened dots whose radius follows a linear ramp along
 // the angle direction — the print-shop tint ramp.
 function drawHalftoneGradient(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
@@ -708,6 +840,12 @@ export function drawPattern(
       break;
     case "plusGrid":
       drawPlusGrid(ctx, W, H, p, cell);
+      break;
+    case "xGrid":
+      drawXGrid(ctx, W, H, p, cell);
+      break;
+    case "cuttingMat":
+      drawCuttingMat(ctx, W, H, p, cell, u);
       break;
     case "halftoneGradient":
       drawHalftoneGradient(ctx, W, H, p, cell);
