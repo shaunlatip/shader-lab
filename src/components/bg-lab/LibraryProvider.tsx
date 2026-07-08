@@ -50,7 +50,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [builtins] = useState<SavedEffect[]>(() => builtinSaved());
   const [saved, setSaved] = useState<SavedEffect[]>(() => loadSaved());
   const [drafts, setDrafts] = useState<Draft[]>(() => loadDrafts());
-  const [draftName, setDraftName] = useState("Untitled");
+  // Empty, not "Untitled" — the header/drafts inputs show the live
+  // suggestDraftName() result as a placeholder over this, and saveDraft falls
+  // back to that same auto name via `name.trim() || suggestDraftName(config)`.
+  // A non-empty initial value here would make that fallback dead code.
+  const [draftName, setDraftName] = useState("");
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   // Synchronous mirror of activeDraftId so a fast double-save resolves identity
   // before React commits the state update (prevents duplicate drafts).
