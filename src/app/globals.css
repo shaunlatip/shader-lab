@@ -793,13 +793,12 @@ html:has(#intro-root[data-phase="reveal"]) {
     font-synthesis: none;
   }
 
-  /* Reserve the scrollbar gutter permanently on the document scroll container.
-   * Locking scroll (intro curtain, nav sheets → `overflow: hidden` on <html>)
-   * no longer removes the scrollbar's width, so content never shifts when the
-   * lock toggles. The reserved strip is filled by the slim custom thumb below,
-   * so it reads as a deliberate element rather than empty native chrome. */
+  /* The lab is a fixed 100dvh shell that never scrolls at the document level —
+   * each panel owns its own ScrollArea. So we must NOT reserve a document
+   * scrollbar gutter (`scrollbar-gutter: stable` here left a dead ~11px strip
+   * down the right edge of the app). Firefox thumb styling stays for the rare
+   * overflow case, but no width is reserved. */
   html {
-    scrollbar-gutter: stable;
     /* Firefox: slim thumb, no track. */
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;

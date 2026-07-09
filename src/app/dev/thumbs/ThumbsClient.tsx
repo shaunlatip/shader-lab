@@ -114,7 +114,16 @@ export default function ThumbsClient() {
           const config: BgConfig = {
             version: 1,
             output: { aspect: "3:2", longEdge: W },
-            source: { mode: "image", imageId: "reference", solidColor: "#cdd9e0" },
+            source: {
+              mode: "image",
+              imageId: "reference",
+              solidColor: "#cdd9e0",
+              // Center-crop zoom (~1.4×): at the 2-up gallery size a full-frame
+              // scene reads as mush. Cropping to the middle 72% enlarges the
+              // subject and the effect's own texture (dots, hatching, dither
+              // cells) so each card actually shows what the effect does.
+              transform: { crop: { x: 0.14, y: 0.14, w: 0.72, h: 0.72 } },
+            },
             stack: preset.build(),
           };
           // No silent fallback for mapped refs — a CDN miss must surface as

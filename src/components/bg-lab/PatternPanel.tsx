@@ -38,19 +38,43 @@ const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
 // listed here under whichever knob they actually read. Cutting mat spins as
 // one rigid design on Angle (grid + registration marks together) but ignores
 // jitter/stagger — only cell/weight/angle/ink apply.
+// Stroke/mark patterns (Matte's model): px Thickness + Opacity. These are the
+// families whose marks are strokes or dots, so an absolute px width reads 1:1
+// with Matte's Thickness slider.
+const STROKE_TYPES: PatternType[] = [
+  "dotGrid", "lineGrid", "graph", "plusGrid", "xGrid",
+  "stripes", "waves", "rings", "iso", "hex", "truchet", "cuttingMat", "moire",
+];
+
 const APPLIES: Partial<Record<string, PatternType[]>> = {
-  angle: ["stripes", "waves", "halftoneGradient", "moire", "fbm", "clouds", "sky", "caustics", "cuttingMat"],
+  // Angle now spins every pattern except the two it can't move: rings (radially
+  // symmetric) and voronoi (no domain rotation). The tiling grids rotate via
+  // the over-scan wrapper in patterns.ts; the rest consume angle themselves.
+  angle: [
+    "dotGrid", "lineGrid", "graph", "checker", "plusGrid", "xGrid", "hex", "truchet", "iso",
+    "stripes", "waves", "halftoneGradient", "moire", "fbm", "clouds", "sky", "caustics", "cuttingMat",
+  ],
+  // Thickness (px) drives the stroke/mark families; the fill/field patterns
+  // (halftone ramp, generative softness) keep Weight instead. Checker is a
+  // pure two-tone fill — neither applies.
+  thickness: STROKE_TYPES,
+  weight: ["halftoneGradient", "voronoi", "fbm", "clouds", "sky", "caustics"],
+  // Opacity fades the marks over the background — every stroke/fill pattern,
+  // but not the opaque generative fields (they gate it out).
+  opacity: [...STROKE_TYPES, "checker", "halftoneGradient"],
   jitter: ["dotGrid", "iso", "plusGrid", "xGrid", "moire", "fbm", "clouds", "sky", "caustics"],
   stagger: ["dotGrid", "halftoneGradient", "voronoi", "caustics"],
 };
 
 const GEOMETRY: ControlSpec[] = [
-  { kind: "slider", key: "cell", label: "Cell size", min: 4, max: 120, step: 1, default: DEFAULT_PATTERN.cell, unit: true },
-  // Floored near zero, not at 0.05 — every draw already clamps stroke/dot
-  // size to a 1px minimum, so the old floor made a true hairline unreachable
-  // at larger cell sizes.
+  { kind: "slider", key: "cell", label: "Spacing", min: 4, max: 200, step: 1, default: DEFAULT_PATTERN.cell, unit: true },
+  // Absolute px stroke/mark width (Matte parity) — fixed in pixels so marks
+  // don't fatten as spacing widens.
+  { kind: "slider", key: "thickness", label: "Thickness", min: 0.5, max: 10, step: 0.5, default: DEFAULT_PATTERN.thickness, unit: true },
+  // Weight (0..1) kept for the fill/field patterns the px thickness can't drive.
   { kind: "slider", key: "weight", label: "Weight", min: 0.01, max: 0.95, step: 0.005, default: DEFAULT_PATTERN.weight },
-  { kind: "slider", key: "angle", label: "Angle", min: -180, max: 180, step: 1, default: DEFAULT_PATTERN.angle },
+  { kind: "slider", key: "opacity", label: "Opacity", min: 0, max: 1, step: 0.01, default: DEFAULT_PATTERN.opacity },
+  { kind: "slider", key: "angle", label: "Rotation", min: -180, max: 180, step: 1, default: DEFAULT_PATTERN.angle },
   { kind: "slider", key: "jitter", label: "Jitter", min: 0, max: 0.5, step: 0.01, default: DEFAULT_PATTERN.jitter },
   { kind: "switch", key: "stagger", label: "Stagger rows", default: DEFAULT_PATTERN.stagger },
 ];
@@ -65,36 +89,36 @@ const INK: ControlSpec[] = [
 // except the type itself.
 const PATTERN_PRESETS: Partial<Record<PatternType, { name: string; patch: Partial<PatternState> }[]>> = {
   dotGrid: [
-    { name: "Notebook", patch: { cell: 28, weight: 0.12, jitter: 0, stagger: false, fg: "#b9b6b0", bg: "#f5f4f1" } },
-    { name: "Bold", patch: { cell: 36, weight: 0.4, jitter: 0, stagger: true, fg: "#1c1b19", bg: "#f1efec" } },
-    { name: "Night", patch: { cell: 28, weight: 0.16, jitter: 0, stagger: false, fg: "#4c4a46", bg: "#141312" } },
+    { name: "Notebook", patch: { cell: 28, thickness: 1.5, jitter: 0, stagger: false, fg: "#b9b6b0", bg: "#f5f4f1" } },
+    { name: "Bold", patch: { cell: 36, thickness: 4, jitter: 0, stagger: true, fg: "#1c1b19", bg: "#f1efec" } },
+    { name: "Night", patch: { cell: 28, thickness: 2, jitter: 0, stagger: false, fg: "#4c4a46", bg: "#141312" } },
   ],
   graph: [
-    { name: "Engineer", patch: { cell: 18, weight: 0.08, fg: "#a9b4bd", bg: "#f6f5f2" } },
-    { name: "Blueprint", patch: { cell: 20, weight: 0.1, fg: "#7d97b5", bg: "#10243a" } },
+    { name: "Engineer", patch: { cell: 18, thickness: 1, fg: "#a9b4bd", bg: "#f6f5f2" } },
+    { name: "Blueprint", patch: { cell: 20, thickness: 1, fg: "#7d97b5", bg: "#10243a" } },
   ],
   plusGrid: [
-    { name: "Registration", patch: { cell: 64, weight: 0.24, jitter: 0, fg: "#8f8c86", bg: "#f5f4f1" } },
-    { name: "Scatter", patch: { cell: 48, weight: 0.18, jitter: 0.35, fg: "#1c1b19", bg: "#efedea" } },
+    { name: "Registration", patch: { cell: 64, thickness: 1.5, jitter: 0, fg: "#8f8c86", bg: "#f5f4f1" } },
+    { name: "Scatter", patch: { cell: 48, thickness: 1.5, jitter: 0.35, fg: "#1c1b19", bg: "#efedea" } },
   ],
   xGrid: [
-    { name: "Registration", patch: { cell: 64, weight: 0.24, jitter: 0, fg: "#8f8c86", bg: "#f5f4f1" } },
-    { name: "Scatter", patch: { cell: 48, weight: 0.18, jitter: 0.35, fg: "#1c1b19", bg: "#efedea" } },
+    { name: "Registration", patch: { cell: 64, thickness: 1.5, jitter: 0, fg: "#8f8c86", bg: "#f5f4f1" } },
+    { name: "Scatter", patch: { cell: 48, thickness: 1.5, jitter: 0.35, fg: "#1c1b19", bg: "#efedea" } },
   ],
   cuttingMat: [
-    { name: "Drafting mat", patch: { cell: 24, weight: 0.15, fg: "#7a8288", bg: "#eef0f1" } },
-    { name: "Blueprint", patch: { cell: 28, weight: 0.2, fg: "#8fb0d8", bg: "#0f2540" } },
+    { name: "Drafting mat", patch: { cell: 24, thickness: 1.5, fg: "#7a8288", bg: "#eef0f1" } },
+    { name: "Blueprint", patch: { cell: 28, thickness: 2, fg: "#8fb0d8", bg: "#0f2540" } },
   ],
   halftoneGradient: [
     { name: "Tint ramp", patch: { cell: 14, weight: 0.5, angle: 90, stagger: true, fg: "#1c1b19", bg: "#f1ece4" } },
     { name: "Riso red", patch: { cell: 16, weight: 0.55, angle: 45, stagger: true, fg: "#ff4b33", bg: "#f6f2ea" } },
   ],
   stripes: [
-    { name: "Hairline", patch: { cell: 12, weight: 0.12, angle: 45, fg: "#c2bfb9", bg: "#f5f4f1" } },
-    { name: "Awning", patch: { cell: 48, weight: 0.5, angle: 0, fg: "#2a2926", bg: "#f1efec" } },
+    { name: "Hairline", patch: { cell: 12, thickness: 1.5, angle: 45, fg: "#c2bfb9", bg: "#f5f4f1" } },
+    { name: "Awning", patch: { cell: 48, thickness: 6, angle: 0, fg: "#2a2926", bg: "#f1efec" } },
   ],
   waves: [
-    { name: "Topo", patch: { cell: 22, weight: 0.14, angle: 0, fg: "#a6a29b", bg: "#f5f4f1" } },
+    { name: "Topo", patch: { cell: 22, thickness: 1.5, angle: 0, fg: "#a6a29b", bg: "#f5f4f1" } },
   ],
   clouds: [
     { name: "Fair day", patch: { cell: 42, weight: 0.35, jitter: 0.3, angle: 60, fg: "#f6f4ef", bg: "#a8c4dd" } },

@@ -103,8 +103,16 @@ export type PatternType = (typeof PATTERN_TYPES)[number];
 
 export interface PatternState {
   type: PatternType;
+  /** Spacing in px (the "Cell size" / "Spacing" slider). */
   cell: number;
+  /** Legacy 0..1 size fraction — kept for the fill/field patterns (halftone
+   * ramp, generative softness) and back-compat with saved patterns. Stroke/mark
+   * patterns use `thickness` (absolute px) instead, matching Matte. */
   weight: number;
+  /** Absolute stroke/mark width in px (Matte-parity "Thickness"). */
+  thickness: number;
+  /** Mark opacity 0..1 over the background (Matte-parity "Opacity"). */
+  opacity: number;
   jitter: number;
   angle: number;
   stagger: boolean;

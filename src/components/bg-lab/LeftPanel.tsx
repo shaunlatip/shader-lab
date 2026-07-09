@@ -16,7 +16,7 @@ export function LeftPanel({ width, collapsed }: { width: number; collapsed: bool
   if (collapsed) return null;
 
   return (
-    <aside style={{ width }} className="flex shrink-0 flex-col overflow-hidden bg-canvas">
+    <aside style={{ width }} className="flex shrink-0 flex-col overflow-hidden border-r border-border-default bg-canvas">
       <ScrollArea id="left-panel-body" className="min-h-0 flex-1">
         <div className="flex flex-col gap-5 p-3">
           <CollapsibleSection title="Source">

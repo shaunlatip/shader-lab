@@ -11,8 +11,29 @@ function hash2(ix: number, iy: number): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
 
+// Absolute stroke/mark width in px (Matte-parity "Thickness"). `cell` already
+// carries the resolution scale (cell = p.cell * u), so u = cell / p.cell
+// recovers it — every draw can turn the px thickness into device px without
+// threading `u` through its signature. Fixed in px means marks do NOT fatten
+// as spacing widens (the key mismatch vs Matte, where weight*cell did).
+function thickPx(p: PatternState, cell: number, min = 0.75): number {
+  return Math.max(min, p.thickness * (cell / p.cell));
+}
+
+// Fold the Opacity control into the foreground color as an alpha channel.
+// rgba() strokes/fills composite the marks over the (opaque) background at
+// p.opacity; any internal globalAlpha juggling (graph minor lines, cutting-mat
+// marks) multiplies on top, which is the correct compounding. Returns p
+// unchanged at full opacity so the common path allocates nothing.
+function withOpacity(p: PatternState): PatternState {
+  if (p.opacity >= 1) return p;
+  const [r, g, b] = hexRGB(p.fg);
+  const a = p.opacity < 0 ? 0 : p.opacity;
+  return { ...p, fg: `rgba(${r},${g},${b},${a})` };
+}
+
 function drawDotGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
-  const r = p.weight * cell * 0.5;
+  const r = thickPx(p, cell, 0.5);
   const jit = p.jitter * cell * 0.5;
   ctx.fillStyle = p.fg;
   const cols = Math.ceil(W / cell) + 1;
@@ -32,7 +53,7 @@ function drawDotGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pat
 
 function drawLineGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) {
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, p.weight * cell);
+  ctx.lineWidth = thickPx(p, cell);
   ctx.beginPath();
   const cols = Math.ceil(W / cell) + 1;
   const rows = Math.ceil(H / cell) + 1;
@@ -76,7 +97,7 @@ function drawStripeLayer(
   ctx.translate(W / 2, H / 2);
   ctx.rotate((angleDeg * Math.PI) / 180);
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, p.weight * cell);
+  ctx.lineWidth = thickPx(p, cell);
   ctx.beginPath();
   for (let i = -count; i <= count; i++) {
     const x = i * cell;
@@ -105,7 +126,7 @@ function drawHex(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pattern
   const rows = Math.ceil(H / yStep) + 2;
   if (cols * rows > MAX_PRIMITIVES) return;
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, p.weight * cell * 0.5);
+  ctx.lineWidth = thickPx(p, cell);
   for (let iy = -1; iy < rows; iy++) {
     const rowOffset = iy % 2 !== 0 ? xStep / 2 : 0;
     for (let ix = -1; ix < cols; ix++) {
@@ -130,7 +151,7 @@ function drawTruchet(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pat
   const rows = Math.ceil(H / cell) + 1;
   if (cols * rows > MAX_PRIMITIVES) return;
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, p.weight * cell * 0.5);
+  ctx.lineWidth = thickPx(p, cell);
   const r = cell / 2;
   const halfPi = Math.PI / 2;
   for (let iy = 0; iy < rows; iy++) {
@@ -163,7 +184,7 @@ function drawRings(ctx: CanvasRenderingContext2D, W: number, H: number, p: Patte
   const count = Math.ceil(maxR / cell);
   if (count > MAX_PRIMITIVES) return;
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, p.weight * cell);
+  ctx.lineWidth = thickPx(p, cell);
   for (let i = 1; i <= count; i++) {
     ctx.beginPath();
     ctx.arc(cx, cy, i * cell, 0, Math.PI * 2);
@@ -176,7 +197,7 @@ function drawIso(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pattern
   ctx.save();
   // shear: x' = x + 0.5*y, y' = 0.866*y  (equilateral triangle grid)
   ctx.transform(1, 0, 0.5, 0.866, 0, 0);
-  const r = p.weight * cell * 0.5;
+  const r = thickPx(p, cell, 0.5);
   const jit = p.jitter * cell * 0.5;
   ctx.fillStyle = p.fg;
   // extend grid to cover the sheared-out region
@@ -204,8 +225,8 @@ function drawGraph(ctx: CanvasRenderingContext2D, W: number, H: number, p: Patte
   const cols = Math.ceil(W / cell) + 1;
   const rows = Math.ceil(H / cell) + 1;
   if (cols + rows > MAX_PRIMITIVES) return;
-  const minorW = Math.max(0.5, p.weight * cell * 0.5);
-  const majorW = Math.max(1, p.weight * cell);
+  const majorW = thickPx(p, cell);
+  const minorW = Math.max(0.5, majorW * 0.6);
   for (const major of [false, true]) {
     ctx.strokeStyle = p.fg;
     ctx.globalAlpha = major ? 1 : 0.45;
@@ -231,10 +252,12 @@ function drawPlusGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pa
   const cols = Math.ceil(W / cell) + 1;
   const rows = Math.ceil(H / cell) + 1;
   if (cols * rows > MAX_PRIMITIVES) return;
-  const arm = p.weight * cell * 0.5;
+  // Arm length is a small fixed fraction of spacing (Matte-style registration
+  // ticks) — thickness drives stroke width, not arm size.
+  const arm = cell * 0.16;
   const jit = p.jitter * cell * 0.5;
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, cell * 0.03);
+  ctx.lineWidth = thickPx(p, cell);
   ctx.beginPath();
   for (let iy = 0; iy <= rows; iy++) {
     for (let ix = 0; ix <= cols; ix++) {
@@ -257,10 +280,12 @@ function drawXGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: Patte
   const cols = Math.ceil(W / cell) + 1;
   const rows = Math.ceil(H / cell) + 1;
   if (cols * rows > MAX_PRIMITIVES) return;
-  const arm = p.weight * cell * 0.5 * Math.SQRT1_2;
+  // Same fixed arm as plusGrid so the two read as siblings at matching
+  // spacing/thickness; SQRT1_2 keeps the diagonal X inside the same box.
+  const arm = cell * 0.16 * Math.SQRT1_2;
   const jit = p.jitter * cell * 0.5;
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, cell * 0.03);
+  ctx.lineWidth = thickPx(p, cell);
   ctx.beginPath();
   for (let iy = 0; iy <= rows; iy++) {
     for (let ix = 0; ix <= cols; ix++) {
@@ -277,105 +302,195 @@ function drawXGrid(ctx: CanvasRenderingContext2D, W: number, H: number, p: Patte
   ctx.stroke();
 }
 
-// Cutting mat: a drafting-mat reference grid — corner bullseyes, a
-// bottom-left sunburst, ruler ticks along the top+left edges, a small
-// circle-crosshair cluster, and corner-to-corner diagonals. Unlike every
-// other pattern here, these read as fixed registration marks printed on a
-// physical mat, so their size and position come from `u` (resolution) only —
-// never from `cell` (spacing). Only the underlying square grid reacts to
-// spacing, same as Line grid. `weight` still scales their stroke width
-// (that's "thickness", not "spacing"); `angle` spins the whole mat (grid +
-// marks together) about the canvas center, same as a physical mat rotated
-// under the material.
+// Cutting mat: a camera/registration test-chart mat. ONLY the background grid
+// and the edge ruler ticks scale with `cell` (spacing) — every registration
+// mark (corner bullseye + crosshair, the mid-right circle cluster, the
+// bottom-left sunburst, the concentric arcs, the corner diagonals, the border
+// and inner frame) is FIXED: positioned as a fraction of W/H and sized in `S`
+// (= W/1000 = u), so it is pixel-identical across every spacing value, exactly
+// like marks silk-screened onto a physical mat. `thickness` drives stroke
+// width, `opacity` fades every stroke (via the fg alpha), `angle` spins the
+// whole mat about the canvas center.
 function drawCuttingMat(ctx: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number, u: number) {
   ctx.save();
   ctx.translate(W / 2, H / 2);
   ctx.rotate((p.angle * Math.PI) / 180);
   ctx.translate(-W / 2, -H / 2);
 
-  drawLineGrid(ctx, W, H, p, cell);
-
-  const lw = Math.max(1, p.weight * 3 * u);
   ctx.strokeStyle = p.fg;
   ctx.fillStyle = p.fg;
+  ctx.lineJoin = "miter";
+  ctx.lineCap = "butt";
 
-  // corner-to-corner diagonals — full canvas, always present
-  ctx.lineWidth = lw;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(W, H);
-  ctx.moveTo(W, 0);
-  ctx.lineTo(0, H);
-  ctx.stroke();
+  const S = W / 1000; // fixed-mark size unit (N*S spans N/1000 of the width == N*u)
+  const mw = Math.max(0.6, p.thickness * u * 0.85); // registration-mark stroke
+  const fw = Math.max(0.4, p.thickness * u * 0.55); // fine stroke (diagonals, rays, ticks)
+  const mx = 0.03 * W; // border margin
+  const my = 0.032 * H;
 
-  // ruler ticks along the top + left edges, fixed interval (not `cell`)
-  const tick = 32 * u;
-  const tickLen = 10 * u;
-  const tickLenMajor = 18 * u;
-  ctx.lineWidth = Math.max(1, u);
-  ctx.beginPath();
-  for (let x = 0, i = 0; x < W; x += tick, i++) {
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, i % 5 === 0 ? tickLenMajor : tickLen);
-  }
-  for (let y = 0, i = 0; y < H; y += tick, i++) {
-    ctx.moveTo(0, y);
-    ctx.lineTo(i % 5 === 0 ? tickLenMajor : tickLen, y);
-  }
-  ctx.stroke();
+  // The reference chart lays its grid on a ~2500px virtual sheet — `spacing` is
+  // in sheet-px, so the mat always shows 2500/spacing divisions regardless of
+  // render resolution (marks stay fixed fractions of W). This is NOT the lab's
+  // usual cell = spacing*u; the cutting mat matches the reference's own scale.
+  const GRID_BASE = 2500;
+  const g = Math.max(2, (W * p.cell) / GRID_BASE);
 
-  const bullseye = (cx: number, cy: number, outerR: number, rings: number) => {
-    ctx.lineWidth = lw;
-    for (let i = 1; i <= rings; i++) {
+  // --- 1. grid (SCALES with spacing) — minor every cell, major every 5 ---
+  const cols = Math.ceil(W / g);
+  const rows = Math.ceil(H / g);
+  if (cols + rows <= MAX_PRIMITIVES) {
+    const gMajor = Math.max(0.5, p.thickness * u);
+    for (const major of [false, true]) {
+      ctx.globalAlpha = major ? 0.5 : 0.28;
+      ctx.lineWidth = major ? gMajor : Math.max(0.35, gMajor * 0.55);
       ctx.beginPath();
-      ctx.arc(cx, cy, (outerR * i) / rings, 0, Math.PI * 2);
+      for (let ix = 0; ix <= cols; ix++) {
+        if ((ix % 5 === 0) !== major) continue;
+        ctx.moveTo(ix * g, 0);
+        ctx.lineTo(ix * g, H);
+      }
+      for (let iy = 0; iy <= rows; iy++) {
+        if ((iy % 5 === 0) !== major) continue;
+        ctx.moveTo(0, iy * g);
+        ctx.lineTo(W, iy * g);
+      }
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+  }
+
+  // helpers for the fixed marks
+  const rings = (cx: number, cy: number, radii: number[], dotR: number) => {
+    ctx.lineWidth = mw;
+    for (const r of radii) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (dotR > 0) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  const crosshair = (cx: number, cy: number, len: number, lw: number) => {
+    ctx.lineWidth = lw;
     ctx.beginPath();
-    ctx.arc(cx, cy, lw * 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(cx - len, cy);
+    ctx.lineTo(cx + len, cy);
+    ctx.moveTo(cx, cy - len);
+    ctx.lineTo(cx, cy + len);
+    ctx.stroke();
   };
 
-  // top-right bullseye
-  const ringR = 46 * u;
-  const inset = 20 * u;
-  bullseye(W - ringR - inset, ringR + inset, ringR, 4);
-
-  // bottom-left bullseye + sunburst rays
-  const sunCx = ringR + inset;
-  const sunCy = H - ringR - inset;
-  bullseye(sunCx, sunCy, ringR * 0.7, 3);
-  const rayCount = 12;
-  const rayLen = ringR * 1.5;
-  ctx.lineWidth = Math.max(1, lw * 0.6);
+  // --- 2. edge ruler ticks (SCALE with spacing), aligned to the grid ---
+  const tMin = 9 * S;
+  const tMaj = 18 * S;
+  ctx.lineWidth = fw;
   ctx.beginPath();
-  for (let i = 0; i < rayCount; i++) {
-    const a = (i / rayCount) * Math.PI * 2;
-    ctx.moveTo(sunCx, sunCy);
-    ctx.lineTo(sunCx + Math.cos(a) * rayLen, sunCy + Math.sin(a) * rayLen);
+  for (let ix = 0; ix <= cols; ix++) {
+    const x = ix * g;
+    if (x < mx || x > W - mx) continue;
+    const L = ix % 5 === 0 ? tMaj : tMin;
+    ctx.moveTo(x, my);
+    ctx.lineTo(x, my + L);
+    ctx.moveTo(x, H - my);
+    ctx.lineTo(x, H - my - L);
+  }
+  for (let iy = 0; iy <= rows; iy++) {
+    const y = iy * g;
+    if (y < my || y > H - my) continue;
+    const L = iy % 5 === 0 ? tMaj : tMin;
+    ctx.moveTo(mx, y);
+    ctx.lineTo(mx + L, y);
+    ctx.moveTo(W - mx, y);
+    ctx.lineTo(W - mx - L, y);
   }
   ctx.stroke();
 
-  // mid-right circle-crosshair cluster (2 rows x 4 cols)
-  const clusterR = 13 * u;
-  const clusterGap = clusterR * 2.4;
-  const clusterCols = 4;
-  const clusterRows = 2;
-  const clusterCx = W - ringR - clusterGap * (clusterCols - 1) - inset * 0.5;
-  const clusterCy = H * 0.55;
-  ctx.lineWidth = Math.max(1, u);
-  for (let r = 0; r < clusterRows; r++) {
-    for (let c = 0; c < clusterCols; c++) {
-      const ccx = clusterCx + c * clusterGap;
-      const ccy = clusterCy + r * clusterGap;
+  // --- 3. border frame (FIXED) ---
+  ctx.lineWidth = Math.max(0.75, p.thickness * u * 1.1);
+  ctx.strokeRect(mx, my, W - 2 * mx, H - 2 * my);
+
+  // --- 4. corner-to-corner diagonals (FIXED) ---
+  ctx.lineWidth = fw;
+  ctx.globalAlpha = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(mx, my);
+  ctx.lineTo(W - mx, H - my);
+  ctx.moveTo(W - mx, my);
+  ctx.lineTo(mx, H - my);
+  ctx.stroke();
+
+  // --- 5. inner frame (FIXED) ---
+  ctx.lineWidth = fw;
+  ctx.strokeRect(0.13 * W, 0.15 * H, 0.74 * W, 0.71 * H);
+  ctx.globalAlpha = 1;
+
+  // --- 6. top-right bullseye + crosshair (FIXED) ---
+  {
+    const cx = 0.85 * W;
+    const cy = 0.168 * H;
+    rings(cx, cy, [30 * S, 58 * S, 88 * S], 6 * S);
+    crosshair(cx, cy, 106 * S, mw);
+  }
+
+  // --- 7. mid-right circle cluster, 2 rows x 4 cols (FIXED) ---
+  {
+    const ccx = 0.775 * W;
+    const ccy = 0.545 * H;
+    const px = 0.052 * W;
+    const py = 0.06 * H;
+    const R = 27 * S;
+    const rIn = 14 * S;
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 4; c++) {
+        const x = ccx + (c - 1.5) * px;
+        const y = ccy + (r - 0.5) * py;
+        ctx.lineWidth = mw;
+        ctx.beginPath();
+        ctx.arc(x, y, R, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, rIn, 0, Math.PI * 2);
+        ctx.stroke();
+        crosshair(x, y, R, fw);
+        ctx.beginPath();
+        ctx.arc(x, y, 3 * S, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // --- 8. bottom-left sunburst — bullseye + a fan of rays (FIXED) ---
+  {
+    const cx = 0.135 * W;
+    const cy = 0.886 * H;
+    rings(cx, cy, [22 * S, 45 * S, 68 * S], 6 * S);
+    // angles CCW from +x (up = +90°); lengths as a fraction of W
+    const rays: [number, number][] = [
+      [180, 0.14], [125, 0.14], [100, 0.15], [86, 0.14],
+      [55, 0.17], [40, 0.19], [22, 0.15], [8, 0.14],
+    ];
+    ctx.lineWidth = fw;
+    ctx.beginPath();
+    for (const [deg, lenF] of rays) {
+      const a = (deg * Math.PI) / 180;
+      const len = lenF * W;
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * len, cy - Math.sin(a) * len);
+    }
+    ctx.stroke();
+  }
+
+  // --- 9. bottom concentric arcs — domes opening upward (FIXED) ---
+  {
+    const cx = 0.56 * W;
+    const cy = 0.95 * H;
+    ctx.lineWidth = fw;
+    for (const rF of [0.135, 0.19, 0.245]) {
       ctx.beginPath();
-      ctx.arc(ccx, ccy, clusterR, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(ccx - clusterR * 0.5, ccy);
-      ctx.lineTo(ccx + clusterR * 0.5, ccy);
-      ctx.moveTo(ccx, ccy - clusterR * 0.5);
-      ctx.lineTo(ccx, ccy + clusterR * 0.5);
+      ctx.arc(cx, cy, rF * W, Math.PI, Math.PI * 2);
       ctx.stroke();
     }
   }
@@ -427,7 +542,7 @@ function drawWaves(ctx: CanvasRenderingContext2D, W: number, H: number, p: Patte
   ctx.translate(W / 2, H / 2);
   ctx.rotate((p.angle * Math.PI) / 180);
   ctx.strokeStyle = p.fg;
-  ctx.lineWidth = Math.max(1, p.weight * cell * 0.5);
+  ctx.lineWidth = thickPx(p, cell);
   const amp = cell * 0.35;
   const wl = cell * 4;
   const step = Math.max(2, cell / 8);
@@ -801,6 +916,47 @@ function drawCaustics(ctx: CanvasRenderingContext2D, W: number, H: number, p: Pa
   ctx.putImageData(img, 0, 0);
 }
 
+// Tiling grids that read the same at any phase — `angle` spins the whole field
+// about the canvas center. They fill 0..W/0..H, so a raw rotation would leave
+// bare triangles at the corners; drawRotatedTiling over-scans to a diag×diag
+// square centered on the canvas so coverage stays complete at any angle.
+// Excluded: patterns that already consume `angle` themselves (stripes/waves/
+// moiré self-rotate, halftone ramps along it, the generative fields rotate
+// their sample domain, cutting mat spins its own marks) and rings (radially
+// symmetric — rotation is a no-op, so it gets no dial).
+const ROTATABLE_TILING: Partial<Record<PatternState["type"], (c: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) => void>> = {
+  dotGrid: drawDotGrid,
+  lineGrid: drawLineGrid,
+  graph: drawGraph,
+  checker: drawChecker,
+  plusGrid: drawPlusGrid,
+  xGrid: drawXGrid,
+  hex: drawHex,
+  truchet: drawTruchet,
+  iso: drawIso,
+};
+
+function drawRotatedTiling(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  p: PatternState,
+  cell: number,
+  draw: (c: CanvasRenderingContext2D, W: number, H: number, p: PatternState, cell: number) => void,
+): void {
+  if (!p.angle) {
+    draw(ctx, W, H, p, cell);
+    return;
+  }
+  const diag = Math.ceil(Math.sqrt(W * W + H * H));
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate((p.angle * Math.PI) / 180);
+  ctx.translate(-diag / 2, -diag / 2);
+  draw(ctx, diag, diag, p, cell);
+  ctx.restore();
+}
+
 export function drawPattern(
   ctx: CanvasRenderingContext2D,
   W: number,
@@ -813,51 +969,36 @@ export function drawPattern(
   ctx.fillStyle = p.bg;
   ctx.fillRect(0, 0, W, H);
 
+  // Stroke/fill patterns fade via the fg alpha (Opacity control). Generative
+  // full-field draws (voronoi/fbm/clouds/sky/caustics) write opaque ImageData
+  // and don't read fg the same way, so they use the raw pattern and gate the
+  // Opacity control out of the panel.
+  const pv = withOpacity(p);
+
+  const tiling = ROTATABLE_TILING[p.type];
+  if (tiling) {
+    drawRotatedTiling(ctx, W, H, pv, cell, tiling);
+    return;
+  }
+
   switch (p.type) {
-    case "dotGrid":
-      drawDotGrid(ctx, W, H, p, cell);
-      break;
-    case "lineGrid":
-      drawLineGrid(ctx, W, H, p, cell);
-      break;
-    case "graph":
-      drawGraph(ctx, W, H, p, cell);
-      break;
-    case "checker":
-      drawChecker(ctx, W, H, p, cell);
-      break;
     case "stripes":
-      drawStripes(ctx, W, H, p, cell);
+      drawStripes(ctx, W, H, pv, cell);
       break;
     case "waves":
-      drawWaves(ctx, W, H, p, cell);
+      drawWaves(ctx, W, H, pv, cell);
       break;
     case "rings":
-      drawRings(ctx, W, H, p, cell);
-      break;
-    case "iso":
-      drawIso(ctx, W, H, p, cell);
-      break;
-    case "plusGrid":
-      drawPlusGrid(ctx, W, H, p, cell);
-      break;
-    case "xGrid":
-      drawXGrid(ctx, W, H, p, cell);
+      drawRings(ctx, W, H, pv, cell);
       break;
     case "cuttingMat":
-      drawCuttingMat(ctx, W, H, p, cell, u);
+      drawCuttingMat(ctx, W, H, pv, cell, u);
       break;
     case "halftoneGradient":
-      drawHalftoneGradient(ctx, W, H, p, cell);
+      drawHalftoneGradient(ctx, W, H, pv, cell);
       break;
     case "moire":
-      drawMoire(ctx, W, H, p, cell);
-      break;
-    case "hex":
-      drawHex(ctx, W, H, p, cell);
-      break;
-    case "truchet":
-      drawTruchet(ctx, W, H, p, cell);
+      drawMoire(ctx, W, H, pv, cell);
       break;
     case "voronoi":
       drawVoronoi(ctx, W, H, p, cell);

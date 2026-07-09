@@ -41,3 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .gstack/
+
+# dev-only cutting-mat parity references (manual reference screenshots used by
+# /dev/cuttingmat — kept local, not committed)
+/public/dev-ref/

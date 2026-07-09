@@ -14,6 +14,8 @@ export const DEFAULT_PATTERN: PatternState = {
   type: "dotGrid",
   cell: 28,
   weight: 0.12,
+  thickness: 1.5,
+  opacity: 1,
   jitter: 0,
   angle: 0,
   stagger: false,
@@ -62,7 +64,7 @@ export const PATTERN_CONTROLS: ControlSpec[] = [
     key: "cell",
     label: "Cell size",
     min: 4,
-    max: 120,
+    max: 200,
     step: 1,
     default: DEFAULT_PATTERN.cell,
     unit: true,
@@ -73,11 +75,34 @@ export const PATTERN_CONTROLS: ControlSpec[] = [
     label: "Weight",
     // Floor down near zero — every draw already clamps stroke/dot size to a
     // 1px minimum, so raising the slider's own floor just made a true
-    // hairline unreachable at larger cell sizes.
+    // hairline unreachable at larger cell sizes. Retained for the fill/field
+    // patterns (halftone ramp, generative softness); stroke/mark patterns use
+    // `thickness` instead.
     min: 0.01,
     max: 0.95,
     step: 0.005,
     default: DEFAULT_PATTERN.weight,
+  },
+  {
+    kind: "slider",
+    key: "thickness",
+    label: "Thickness",
+    // Absolute px stroke/mark width (Matte parity). Fixed in pixels so marks
+    // don't fatten as spacing widens — the key mismatch vs Matte.
+    min: 0.5,
+    max: 10,
+    step: 0.5,
+    default: DEFAULT_PATTERN.thickness,
+    unit: true,
+  },
+  {
+    kind: "slider",
+    key: "opacity",
+    label: "Opacity",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: DEFAULT_PATTERN.opacity,
   },
   {
     kind: "slider",

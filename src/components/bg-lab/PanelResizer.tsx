@@ -74,14 +74,15 @@ export function PanelResizer({
       onKeyDown={onKeyDown}
       className="group relative z-10 w-1 shrink-0 cursor-col-resize touch-none outline-none"
     >
-      {/* Invisible at rest — the Stage's background swings from near-white to
-          near-black across themes, so any fixed resting color reads as a
-          stray bright/dark bar on one side. Only reveal on hover/focus/drag,
-          when a line is expected and its exact tone doesn't matter. */}
+      {/* The persistent seam is the panel's own border (border-r/border-l on
+          the aside). This overlay sits exactly on top of that 1px border — the
+          negative inset pulls it over the border rather than beside it — and
+          only strengthens the tone on hover/focus/drag so the divider reads as
+          "grabbable" without adding a second line. */}
       <div
         className={
           "absolute inset-y-0 w-px bg-transparent transition-colors group-hover:bg-border-strong/70 group-active:bg-border-strong group-focus-visible:bg-border-strong " +
-          (side === "left" ? "left-0" : "right-0")
+          (side === "left" ? "-left-px" : "-right-px")
         }
       />
     </div>

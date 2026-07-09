@@ -15,7 +15,7 @@ export function RightPanel({ width, collapsed }: { width: number; collapsed: boo
   if (collapsed) return null;
 
   return (
-    <aside style={{ width }} className="flex shrink-0 flex-col overflow-hidden bg-canvas">
+    <aside style={{ width }} className="flex shrink-0 flex-col overflow-hidden border-l border-border-default bg-canvas">
       {/* Add-search stays above the scroll region so its dropdown can overlay. */}
       <div className="shrink-0 border-b border-border-default p-3">
         <AddEffectSearch />
