@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
-import { Crop, Sparkles, Upload } from "lucide-react";
+import { toast } from "sonner";
+import { Crop, Shuffle, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GALLERY, inspire } from "@/lib/bg-lab/presets";
+import { GALLERY, randomGalleryId, randomPexelsId } from "@/lib/bg-lab/presets";
 import { useBgLab } from "./BgLabProvider";
 import { PexelsSearch } from "./PexelsSearch";
 import { SolidColorPanel } from "./SolidColorPanel";
@@ -15,6 +16,7 @@ export function SourcePanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
   const [cropOpen, setCropOpen] = useState(false);
+  const [randomizing, setRandomizing] = useState(false);
   const { source } = config;
   const hasMedia = (source.mode === "image" || source.mode === "video") && !!source.imageId;
   // pattern mode never shows crop UI
@@ -25,6 +27,26 @@ export function SourcePanel() {
     if (!f) return;
     const url = URL.createObjectURL(f);
     dispatch({ t: "setSource", patch: { mode, imageId: url } });
+  }
+
+  // Scoped randomize: only swaps the source for the active tab (the stack is
+  // untouched — random preset lives in the Presets section, random color /
+  // pattern in their own panels).
+  async function randomizeSource() {
+    const mode = source.mode as "image" | "video";
+    setRandomizing(true);
+    try {
+      const id = await randomPexelsId(mode === "video" ? "video" : "photo");
+      if (id) {
+        dispatch({ t: "setSource", patch: { mode, imageId: id } });
+      } else if (mode === "image") {
+        dispatch({ t: "setSource", patch: { mode, imageId: randomGalleryId() } }); // offline fallback
+      } else {
+        toast.error("Couldn't fetch a random video", { description: "Pexels search isn't available right now." });
+      }
+    } finally {
+      setRandomizing(false);
+    }
   }
 
   return (
@@ -49,24 +71,28 @@ export function SourcePanel() {
         </TabsList>
       </Tabs>
 
-      <div className="flex gap-1.5">
-        <button
-          type="button"
-          onClick={() => dispatch({ t: "replace", config: inspire() })}
-          className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-md text-[12px]")}
-        >
-          <Sparkles className="h-3.5 w-3.5" /> Inspire me
-        </button>
-        {hasMedia && (
+      {(source.mode === "image" || source.mode === "video") && (
+        <div className="flex gap-1.5">
           <button
             type="button"
-            onClick={() => setCropOpen(true)}
-            className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-md text-[12px]")}
+            disabled={randomizing}
+            onClick={randomizeSource}
+            className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px] disabled:opacity-60")}
           >
-            <Crop className="h-3.5 w-3.5" /> Crop{transformed ? " ·" : ""}
+            <Shuffle className="h-3.5 w-3.5" />
+            {randomizing ? "Rolling…" : source.mode === "video" ? "Random video" : "Random image"}
           </button>
-        )}
-      </div>
+          {hasMedia && (
+            <button
+              type="button"
+              onClick={() => setCropOpen(true)}
+              className={cn(labButton, "flex h-8 flex-1 items-center justify-center gap-2 rounded-control text-[12px]")}
+            >
+              <Crop className="h-3.5 w-3.5" /> Crop{transformed ? " ·" : ""}
+            </button>
+          )}
+        </div>
+      )}
       {cropOpen && <CropRotate onClose={() => setCropOpen(false)} />}
 
       {source.mode === "solid" && <SolidColorPanel />}
@@ -74,20 +100,21 @@ export function SourcePanel() {
 
       {source.mode === "image" && (
         <>
-          <CollapsibleSection
-            title="Gallery"
-            defaultOpen
-            action={
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                className="inline-flex items-center gap-1 rounded text-[11px] text-text-secondary transition-colors hover:text-text-primary"
-              >
-                <Upload className="h-3 w-3" /> Upload
-              </button>
-            }
+          {/* Your image first: this is a tool for the user's own assets.
+              Starters exist so a first render is one click away. */}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex h-9 items-center justify-center gap-2 rounded-control border border-border-default bg-canvas text-[13px] text-text-primary shadow-xs transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover"
           >
-            <div className="grid grid-cols-4 gap-1.5">
+            <Upload className="h-3.5 w-3.5" /> Upload image
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => onUpload(e, "image")} />
+
+          <PexelsSearch kind="photo" />
+
+          <CollapsibleSection title="Starters" defaultOpen>
+            <div className="grid grid-cols-3 gap-1.5">
               {GALLERY.map((g) => (
                 <button
                   key={g.id}
@@ -95,7 +122,7 @@ export function SourcePanel() {
                   title={g.label}
                   onClick={() => dispatch({ t: "setSource", patch: { imageId: g.id } })}
                   className={cn(
-                    "group aspect-square overflow-hidden rounded-md border-2 transition-[transform,border-color] duration-150 ease-out motion-safe:active:scale-[0.96]",
+                    "group aspect-square overflow-hidden rounded-control border-2 transition-[transform,border-color] duration-150 ease-out motion-safe:active:scale-[0.96]",
                     source.imageId === g.id
                       ? "border-text-primary"
                       : "border-transparent hover:border-border-strong",
@@ -112,8 +139,6 @@ export function SourcePanel() {
               ))}
             </div>
           </CollapsibleSection>
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => onUpload(e, "image")} />
-          <PexelsSearch kind="photo" />
         </>
       )}
 
@@ -122,7 +147,7 @@ export function SourcePanel() {
           <button
             type="button"
             onClick={() => videoRef.current?.click()}
-            className="flex h-9 items-center justify-center gap-2 rounded-md border border-border-default bg-canvas text-[13px] text-text-primary transition-colors hover:border-border-strong"
+            className="flex h-9 items-center justify-center gap-2 rounded-control border border-border-default bg-canvas text-[13px] text-text-primary transition-colors hover:border-border-strong"
           >
             <Upload className="h-3.5 w-3.5" /> Upload video
           </button>

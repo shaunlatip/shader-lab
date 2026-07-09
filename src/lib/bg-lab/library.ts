@@ -3,7 +3,8 @@
 import { nanoid } from "nanoid";
 import type { BgConfig, Effect, SourceState } from "./types";
 import { EFFECT_CATALOG } from "./catalog";
-import { GALLERY, PRESETS } from "./presets";
+import { PATTERN_TYPE_LABEL } from "./patternCatalog";
+import { GALLERY, PRESETS, type PresetCategory } from "./presets";
 
 /** A named, reusable effect stack. `builtin` ones ship with the app. */
 export interface SavedEffect {
@@ -11,6 +12,8 @@ export interface SavedEffect {
   name: string;
   stack: Effect[];
   builtin?: boolean;
+  /** Section header for builtins (user saves have none). */
+  group?: PresetCategory;
 }
 
 /** A named snapshot of the whole editor (source + output + stack). */
@@ -25,7 +28,7 @@ export const DRAFTS_KEY = "bg-lab/drafts/v1";
 
 /** Built-in preset looks, materialized as saved effects. */
 export function builtinSaved(): SavedEffect[] {
-  return PRESETS.map((p, i) => ({ id: `builtin-${i}`, name: p.name, stack: p.build(), builtin: true }));
+  return PRESETS.map((p) => ({ id: `builtin-${p.slug}`, name: p.name, stack: p.build(), builtin: true, group: p.category }));
 }
 
 /** Fresh ids + cloned params so a loaded stack is independent of the stored one. */
@@ -52,18 +55,11 @@ export function loadDrafts(): Draft[] {
   return readArray<Draft>(DRAFTS_KEY).filter((d) => d && d.config && Array.isArray(d.config.stack));
 }
 
-const PATTERN_TYPE_LABEL: Record<string, string> = {
-  dotGrid: "Dot grid",
-  lineGrid: "Line grid",
-  checker: "Checker",
-  stripes: "Stripes",
-  rings: "Rings",
-  iso: "Iso lattice",
-};
+// Labels live in patternCatalog (one source of truth for pattern types).
 
 /** Human label for a source, for auto-naming. */
 function sourceLabel(s: SourceState): string {
-  if (s.mode === "pattern") return "Pattern · " + (PATTERN_TYPE_LABEL[s.pattern?.type ?? ""] ?? "");
+  if (s.mode === "pattern") return "Pattern · " + (s.pattern ? (PATTERN_TYPE_LABEL[s.pattern.type] ?? "") : "");
   if (s.mode === "solid") return s.solidColor;
   const id = s.imageId;
   if (!id) return s.mode === "video" ? "Video" : "";

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { drawTransformedSource } from "@/lib/bg-lab/engine/cpu/sourceTransform";
 import { useBgLab } from "./BgLabProvider";
 import { useEngineSource } from "./SourceProvider";
-import { labButton } from "./panel";
+import { IconTip, labButton } from "./panel";
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const PREVIEW_W = 520;
@@ -122,25 +122,31 @@ export function CropRotate({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="lab-chrome font-lab flex max-h-full flex-col gap-3 rounded-lg border border-border-default bg-canvas p-4 text-text-primary shadow-5"
+        className="lab-chrome font-lab flex max-h-full flex-col gap-3 rounded-card border border-border-default bg-canvas p-4 text-text-primary shadow-5"
       >
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-[14px] font-medium">Crop &amp; rotate</h2>
           <div className="flex items-center gap-1.5">
-            <Button variant="outline" size="icon-sm" className={labButton} aria-label="Rotate left" onClick={() => setRotate(((rotate + 270) % 360) as 0 | 90 | 180 | 270)}>
-              <RotateCcw className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="outline" size="icon-sm" className={labButton} aria-label="Rotate right" onClick={() => setRotate(((rotate + 90) % 360) as 0 | 90 | 180 | 270)}>
-              <RotateCw className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="outline" size="icon-sm" className={cn(labButton, flipH && "border-text-primary")} aria-label="Flip horizontal" onClick={() => setFlipH((f) => !f)}>
-              <FlipHorizontal2 className="h-3.5 w-3.5" />
-            </Button>
+            <IconTip label="Rotate left">
+              <Button variant="outline" size="icon-sm" className={labButton} aria-label="Rotate left" onClick={() => setRotate(((rotate + 270) % 360) as 0 | 90 | 180 | 270)}>
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </IconTip>
+            <IconTip label="Rotate right">
+              <Button variant="outline" size="icon-sm" className={labButton} aria-label="Rotate right" onClick={() => setRotate(((rotate + 90) % 360) as 0 | 90 | 180 | 270)}>
+                <RotateCw className="h-3.5 w-3.5" />
+              </Button>
+            </IconTip>
+            <IconTip label="Flip horizontal">
+              <Button variant="outline" size="icon-sm" className={cn(labButton, flipH && "border-text-primary")} aria-label="Flip horizontal" onClick={() => setFlipH((f) => !f)}>
+                <FlipHorizontal2 className="h-3.5 w-3.5" />
+              </Button>
+            </IconTip>
           </div>
         </div>
 
         {/* preview + crop overlay */}
-        <div ref={boxRef} className="relative mx-auto overflow-hidden rounded-md bg-shade-10" style={{ width: PW, height: PH }}>
+        <div ref={boxRef} className="relative mx-auto overflow-hidden rounded-md bg-surface-hover" style={{ width: PW, height: PH }}>
           <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
           <div
             onPointerDown={ratio == null ? undefined : onDown}

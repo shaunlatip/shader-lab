@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { createEngine, type EngineSource, type RenderEngine } from "@/lib/bg-lab/engine";
 import { MAX_EXPORT_PIXELS, outputDims, totalPixels } from "@/lib/bg-lab/resolution";
 import { createGifEncoder, createMp4Encoder, supportsMp4 } from "@/lib/bg-lab/export/encoders";
+import type { StillJob, StillResult } from "@/lib/bg-lab/export/stillWorker";
 import type { BgConfig, Dims } from "@/lib/bg-lab/types";
 
 export type StillFormat = "png" | "jpg";
@@ -26,6 +27,46 @@ function download(blob: Blob, name: string) {
 /** Yield a macrotask so React can flush state (spinner/progress) and the
  * browser can paint before the next synchronous render/encode block. */
 const yieldToUI = () => new Promise<void>((res) => setTimeout(res, 0));
+
+// --- still-export worker (module-level: reused across exports; one job at a
+// time — useExport serializes on its `exporting` flag). The full-res CPU
+// render runs off the main thread so huge exports don't freeze the UI.
+let stillWorker: Worker | null = null;
+
+function decomposeSource(src: EngineSource): Promise<Pick<StillJob, "image" | "solid" | "pattern">> {
+  if (src?.kind === "image") return createImageBitmap(src.image).then((image) => ({ image }));
+  // A video still exports its current frame (same as the sync path's drawImage)
+  if (src?.kind === "video") return createImageBitmap(src.video).then((image) => ({ image }));
+  if (src?.kind === "pattern") return Promise.resolve({ pattern: src.pattern });
+  return Promise.resolve({ solid: src?.kind === "solid" ? src.color : undefined });
+}
+
+function renderStillInWorker(config: BgConfig, dims: Dims, source: EngineSource, mime: string, quality?: number): Promise<Blob> {
+  return decomposeSource(source).then(
+    (parts) =>
+      new Promise<Blob>((resolve, reject) => {
+        stillWorker ??= new Worker(new URL("../lib/bg-lab/export/stillWorker.ts", import.meta.url));
+        const worker = stillWorker;
+        const job: StillJob = { config, dims, mime, quality, ...parts };
+        worker.onmessage = (ev: MessageEvent<StillResult>) => {
+          if (ev.data.ok) resolve(ev.data.blob);
+          else {
+            const err = new Error(ev.data.error);
+            if (ev.data.name) err.name = ev.data.name;
+            reject(err);
+          }
+        };
+        worker.onerror = (ev) => {
+          // Worker failed to load/run (bundler or environment issue) — a fresh
+          // one is created on the next attempt; caller falls back to sync.
+          stillWorker = null;
+          worker.terminate();
+          reject(new Error(ev.message || "still-export worker failed"));
+        };
+        worker.postMessage(job, parts.image ? [parts.image] : []);
+      }),
+  );
+}
 
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
   const target = Math.min(t, Math.max(0, (video.duration || 0) - 0.001));
@@ -70,32 +111,34 @@ export function useExport() {
       return;
     }
     setExporting(true);
-    // The full-res CPU render below is one long synchronous block — yield first
-    // so the "exporting" state actually paints before the UI freezes.
     await yieldToUI();
+    const mime = format === "jpg" ? "image/jpeg" : "image/png";
+    const quality = format === "jpg" ? 0.92 : undefined;
     try {
-      const canvas = document.createElement("canvas");
       // ARCHITECTURE CONSTRAINT: still export uses the CPU engine — the CPU op is
       // the source of truth (GL is the preview accelerator). Don't switch this to
       // GL without pixel-parity guarantees (docs/effects-lab-handoff.md, F0).
-      const engine = cpu();
-      engine.setSource(engineSource);
-      engine.render(canvas, config, dims);
-      const mime = format === "jpg" ? "image/jpeg" : "image/png";
-      canvas.toBlob(
-        (blob) => {
-          setExporting(false);
-          if (!blob) {
-            cb?.onError?.("Export failed (the image may be cross-origin and untainted-only).");
-            return;
-          }
-          const name = `background-${dims.W}x${dims.H}.${format}`;
-          download(blob, name);
-          cb?.onDone?.(name);
-        },
-        mime,
-        format === "jpg" ? 0.92 : undefined,
-      );
+      let blob: Blob;
+      try {
+        // Preferred: render in a worker (no main-thread freeze on big exports).
+        blob = await renderStillInWorker(config, dims, engineSource, mime, quality);
+      } catch (err) {
+        // SecurityError = tainted source; the sync path fails identically, so
+        // surface it. Anything else (no Worker/OffscreenCanvas, bundler issue)
+        // falls back to the previous synchronous main-thread render.
+        if (err instanceof Error && err.name === "SecurityError") throw err;
+        const canvas = document.createElement("canvas");
+        const engine = cpu();
+        engine.setSource(engineSource);
+        engine.render(canvas, config, dims);
+        blob = await new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))), mime, quality);
+        });
+      }
+      setExporting(false);
+      const name = `background-${dims.W}x${dims.H}.${format}`;
+      download(blob, name);
+      cb?.onDone?.(name);
     } catch (err) {
       setExporting(false);
       cb?.onError?.(
@@ -157,7 +200,7 @@ export function useExport() {
           engine.setSource(engineSource);
           engine.render(canvas, config, dims, t);
         }
-        enc.addFrame(canvas);
+        await enc.addFrame(canvas);
         setProgress((i + 1) / frames);
       }
       const blob = await enc.finish();

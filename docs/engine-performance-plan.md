@@ -72,14 +72,21 @@ Small, ordered, each independently shippable:
    pattern/static base to an offscreen bitmap keyed `(W,H,params)`; `drawImage` per frame. Matters
    once animated stacks run on the CPU engine. *(S–M)*
 
-## Known parity gap (found by the harness, 2026-07-02)
+## Halftone parity gap — FIXED (2026-07-03)
 
-`/dev/parity` on the haystack test image, 800×533: every bridged op and the ordered-dither GL pass
-are **pixel-identical** (0.00 max delta) — but **halftone GL vs CPU diverges** (max channel delta
-107/255, mean 12.7, 50.8% of pixels off by >1). Pre-existing, shader-level (nothing in the
-pipeline: bridged ops are 0.00). Prime suspect per roadmap §2: the GL pass samples the source
-through a `LINEAR`-filtered texture while the CPU op samples exact texels — plus possible AA/lattice
-edge differences. Fix alongside P1 work; acceptance = the harness reads ≤1 max delta.
+The 107/255 max-delta halftone divergence was **AA**, not sampling: canvas vector fills (Skia
+analytic area coverage) vs the shader's `fwidth` smoothstep (~2px ramp) can never agree. Fix per
+the roadmap §2 contract: the CPU op was rewritten as a **per-pixel mirror of the GL shader**
+(`ops.ts` `buildHtScreen`/`runHtScreen`) and both engines now share one deterministic AA spec —
+`aaCov(dPx) = clamp(0.5 − dPx, 0..1)`, a 1px linear area ramp on the SDF in px units. CMYK also
+now multiplies ink layers in float and quantises once on both engines.
+
+Harness results (haystack, 800×533): **mono 1.00 max / 0.0009 mean / 0.000% >1; CMYK 1.00 max /
+0.0015 mean / 0.000% >1** (configs added to `/dev/parity`). A square+stagger+angle-22 variant
+reads 8/255 max on 0.004% of pixels — `floor(Pc+0.5)` texel-choice ties where GPU f32 trig and
+CPU f64 trig disagree; GPU trig is implementation-defined, so tie-break exactness is out of
+reach in principle. Bounded, rare, accepted. Cost note: the CPU halftone is now O(pixels×9 dots)
+(~2–4× slower than the old vector fills) — fine for export (F0 truth), and GL is the preview path.
 
 ## P1 — Bridge-killers: GL passes for the heavy bridged ops
 
@@ -163,11 +170,16 @@ then S each)*
 
 ## Sequence summary
 
-| Order | What | Gate | Size |
-|---|---|---|---|
-| P0 | honesty + hygiene (7 items) | — | ~1 day |
-| P1 | grain, gradientMap, kuwahara, lineArt, crt GL passes | P0.1 harness | ~2–3 days |
-| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days |
-| P3 | F5a → blur/XDoG; F5b → bloom; F6+aniso-Kuwahara | F5a/b/6 | ~3–5 days |
-| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked |
-| ∥ | export track (GIF palette, MP4 backpressure, worker) | — | interleave |
+| Order | What | Gate | Size | Status (2026-07-04 follow-up pass) |
+|---|---|---|---|---|
+| P0 | honesty + hygiene (7 items) | — | ~1 day | ✅ shipped (PR #4) |
+| P1 | grain, gradientMap, kuwahara, lineArt, crt GL passes | P0.1 harness | ~2–3 days | ✅ all 5 + halftone parity fix. Bench: kuwahara smooth 2790×, lineArt 724×, crt 60×, grain 47×, gradientMap 44× |
+| P2 | F4 wiring → blue-noise, ASCII atlas | F4 | ~1–2 days | ✅ F4 + blue-noise (0.00 parity). ✅ ASCII/glyph atlas 2026-07-04: F4 dynamic (param-keyed) samplers, all 8 glyph types GL-native (66×, bridge gone), exotic params (blurred/transparent bg, blends, dotGrid, randomize) stay correctly bridged |
+| P3 | F5a → blur/XDoG; F5b → bloom; F6+aniso-Kuwahara | F5a/b/6 | ~3–5 days | ✅ F5a + blur(4 modes)/bloom/characterBloom. ✅ XDoG shipped 2026-07-04 (sharpened Winnemöller, max 1/255 parity, 16-bit packed RGBA8 temps). ✅ CPU blur edge-alpha fixed (opaquify; minAlphaCpu 255 all modes). F5b pyramid skipped; F6/aniso deferred (needs new foundation) |
+| P4 | halftone extras, chromatic, creative-medium, SDF patterns | specs | as picked | ✅ complete 2026-07-04: overflow+gooey + chromatic (overnight); patterns moire/hex/truchet/voronoi/fbm (CPU pattern-source draws — GL SDF variant gated on a pattern-drift feature that doesn't exist, no dead code); all five creative-medium singles (receipt, flutedGlass, ledPanel, crochet at max 1/255 parity; lego stud lighting CPU-only by design) |
+| ∥ | export track (GIF palette, MP4 backpressure, worker) | — | interleave | ✅ complete 2026-07-04: still export runs in a Worker (OffscreenCanvas; engine worker-compat via tmpCanvas fallback), verified live |
+
+Post-P3 bridge status: every op in the preset library runs GPU-side except the
+by-design CPU composites (braille/mosaic/lego/glitch/filmDust, error-diffusion
+dither, shaped pixelate, >8-stop gradientMap). Known accepted divergences and
+the CPU blur-family edge-alpha quirk are documented in the P1/P3 commits.

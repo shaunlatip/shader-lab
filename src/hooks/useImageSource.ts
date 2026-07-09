@@ -1,18 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { galleryUrl } from "@/lib/bg-lab/presets";
-import type { PatternState, SourceState } from "@/lib/bg-lab/types";
+import { DEFAULT_PATTERN } from "@/lib/bg-lab/patternCatalog";
+import type { SourceState } from "@/lib/bg-lab/types";
 import type { EngineSource } from "@/lib/bg-lab/engine";
-
-export const DEFAULT_PATTERN: PatternState = {
-  type: "dotGrid",
-  cell: 24,
-  weight: 0.3,
-  jitter: 0,
-  angle: 0,
-  stagger: false,
-  fg: "#e7e5e4",
-  bg: "#16140f",
-};
 
 // Resolve an imageId to a URL: gallery ids map to /explorations/..., everything
 // else (uploads' object URLs, pexels:<url>, pexels:video:<url>) is a direct URL.

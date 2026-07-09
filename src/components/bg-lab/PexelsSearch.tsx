@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PEXELS_TAGS } from "@/lib/bg-lab/presets";
 import { useBgLab } from "./BgLabProvider";
-import { CollapsibleSection, labButton } from "./panel";
+import { CollapsibleSection, IconTip, labButton } from "./panel";
 
 interface PexelsResult {
   id: string;
@@ -98,9 +98,11 @@ export function PexelsSearch({ kind = "photo" }: { kind?: "photo" | "video" }) {
           className="flex gap-1.5"
         >
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search Pexels…" className="h-8 text-xs" />
-          <Button type="submit" variant="outline" size="icon-sm" aria-label="Search" className={labButton}>
-            <Search className="h-3.5 w-3.5" />
-          </Button>
+          <IconTip label="Search Pexels">
+            <Button type="submit" variant="outline" size="icon-sm" aria-label="Search" className={labButton}>
+              <Search className="h-3.5 w-3.5" />
+            </Button>
+          </IconTip>
         </form>
 
         {/* Suggested queries — single-row horizontal scroll, no wrap. */}
@@ -142,7 +144,7 @@ export function PexelsSearch({ kind = "photo" }: { kind?: "photo" | "video" }) {
                               : { mode: "image", imageId: `pexels:${r.full}` },
                         })
                       }
-                      className="group relative aspect-square overflow-hidden rounded-md border-2 border-transparent transition-[transform,border-color] duration-150 ease-out hover:border-border-strong motion-safe:active:scale-[0.96]"
+                      className="group relative aspect-square overflow-hidden rounded-control border-2 border-transparent transition-[transform,border-color] duration-150 ease-out hover:border-border-strong motion-safe:active:scale-[0.96]"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img

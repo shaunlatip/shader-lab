@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronRight, GripVertical, X } from "lucide-react";
+import { Minus } from "@phosphor-icons/react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -14,6 +15,7 @@ import {
 import type { Effect } from "@/lib/bg-lab/types";
 import { useBgLab } from "./BgLabProvider";
 import { ControlRow } from "./controls/ControlRow";
+import { IconTip } from "./panel";
 
 export function EffectCard({ effect }: { effect: Effect }) {
   const { dispatch } = useBgLab();
@@ -24,9 +26,10 @@ export function EffectCard({ effect }: { effect: Effect }) {
   const meta = effect.type ? EFFECT_CATALOG[effect.type] : null;
   const style = { transform: CSS.Translate.toString(transform), transition };
 
-  // hide rows gated by an unmet `showIf` (e.g. Glyphs only when charSet = custom)
+  // hide rows gated by an unmet `showIf` (e.g. Glyphs only when charSet =
+  // custom) and rows marked `hidden` (params that exist but aren't user knobs)
   const visible = (meta?.controls ?? []).filter(
-    (c) => !c.showIf || c.showIf.in.includes(effect.params[c.showIf.key]),
+    (c) => !c.hidden && (!c.showIf || c.showIf.in.includes(effect.params[c.showIf.key])),
   );
   const grouped = visible.some((c) => c.group);
 
@@ -44,22 +47,20 @@ export function EffectCard({ effect }: { effect: Effect }) {
       ref={setNodeRef}
       style={style}
       className={cn(
-        "group/card rounded-md border border-border-default bg-canvas transition-[opacity,box-shadow,border-color] duration-150 ease-out",
+        "group/card rounded-card border border-border-default bg-canvas transition-[opacity,box-shadow,border-color] duration-150 ease-out",
         isDragging ? "z-10 opacity-90 shadow-3" : "hover:border-border-strong",
         !effect.enabled && "opacity-55",
       )}
     >
-      <div className="flex items-center gap-1 px-1.5 py-1.5">
-        <button
-          type="button"
-          className="cursor-grab touch-none rounded p-0.5 text-text-secondary transition-colors duration-150 hover:text-text-primary active:cursor-grabbing"
-          aria-label="Drag to reorder"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
-
+      {/* The whole header row is the drag handle (hold anywhere and move —
+          no grip icon; the 4px sensor activation keeps plain clicks working).
+          Keyboard reorder keeps working through the sortable attributes on
+          this row (space to lift, arrows to move). */}
+      <div
+        className="flex touch-none items-center gap-1 px-1.5 py-1.5"
+        {...attributes}
+        {...listeners}
+      >
         {/* Static label — type is chosen at add-time via the search field, so
             the card itself carries no dropdown. Click anywhere on the label to
             expand the controls. */}
@@ -86,16 +87,18 @@ export function EffectCard({ effect }: { effect: Effect }) {
           aria-label="Toggle effect"
         />
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => dispatch({ t: "remove", id: effect.id })}
-          aria-label="Remove effect"
-          className="text-text-secondary transition-[transform,color] duration-150 hover:text-text-primary active:scale-90"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        <IconTip label="Remove effect">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => dispatch({ t: "remove", id: effect.id })}
+            aria-label="Remove effect"
+            className="text-text-secondary transition-[transform,color] duration-150 hover:text-text-primary active:scale-90"
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
+        </IconTip>
       </div>
 
       {open && meta && (
@@ -127,7 +130,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
                           )}
                         />
                         <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
-                          {CONTROL_GROUP_LABEL[g]}
+                          {meta.groupLabels?.[g] ?? CONTROL_GROUP_LABEL[g]}
                         </span>
                       </button>
                       {advOpen && <div className="flex flex-col gap-2.5">{rows.map(row)}</div>}
@@ -138,7 +141,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
                 return (
                   <div key={g} className="flex flex-col gap-2.5">
                     <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
-                      {CONTROL_GROUP_LABEL[g]}
+                      {meta.groupLabels?.[g] ?? CONTROL_GROUP_LABEL[g]}
                     </span>
                     {rows.map(row)}
                   </div>

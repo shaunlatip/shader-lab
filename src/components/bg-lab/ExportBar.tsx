@@ -62,7 +62,7 @@ export function ExportBar() {
 
   return (
     <div className="border-t border-border-default bg-canvas p-3">
-      <CollapsibleSection title="Export" defaultOpen={false}>
+      <CollapsibleSection title="Export" defaultOpen={false} reverse>
         <div className="flex flex-col gap-2.5">
       <div className={ROW}>
         <span className={LABEL}>Aspect</span>

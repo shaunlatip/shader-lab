@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { suggestDraftName } from "@/lib/bg-lab/library";
 import { useBgLab } from "./BgLabProvider";
 import { useLibrary } from "./LibraryProvider";
-import { labButton } from "./panel";
+import { IconTip, labButton } from "./panel";
 
 function describe(stackLen: number, aspect: unknown) {
   const a = typeof aspect === "string" ? aspect : "custom";
@@ -44,24 +44,26 @@ export function DraftsPanel() {
           placeholder={suggested}
           className="h-8 min-w-0 flex-1 text-xs"
         />
-        <button
-          type="submit"
-          aria-label={activeDraftId ? "Update draft" : "Save draft"}
-          title={activeDraftId ? "Update draft" : "Save draft"}
-          className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-md")}
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        {activeDraftId && (
+        <IconTip label={activeDraftId ? "Update draft" : "Save draft"}>
           <button
-            type="button"
-            onClick={saveNew}
-            aria-label="Save as new draft"
-            title="Save as new draft"
-            className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-md")}
+            type="submit"
+            aria-label={activeDraftId ? "Update draft" : "Save draft"}
+            className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-control")}
           >
-            <CopyPlus className="h-4 w-4" />
+            <Plus className="h-4 w-4" />
           </button>
+        </IconTip>
+        {activeDraftId && (
+          <IconTip label="Save as new draft">
+            <button
+              type="button"
+              onClick={saveNew}
+              aria-label="Save as new draft"
+              className={cn(labButton, "grid h-8 w-8 shrink-0 place-items-center rounded-control")}
+            >
+              <CopyPlus className="h-4 w-4" />
+            </button>
+          </IconTip>
         )}
       </form>
 
@@ -76,20 +78,22 @@ export function DraftsPanel() {
           {list.map((d) => (
             <div
               key={d.id}
-              className="group/draft flex items-center gap-2 rounded-md border border-border-default bg-canvas p-2 transition-colors hover:border-border-strong"
+              className="group/draft flex items-center gap-2 rounded-card border border-border-default bg-canvas p-2 transition-colors hover:border-border-strong"
             >
               <button type="button" onClick={() => loadDraft(d.id)} className="flex min-w-0 flex-1 flex-col items-start text-left">
                 <span className="w-full truncate text-[13px] font-medium text-text-primary">{d.name}</span>
                 <span className="text-[11px] text-text-secondary">{describe(d.config.stack.length, d.config.output.aspect)}</span>
               </button>
-              <button
-                type="button"
-                aria-label={`Delete ${d.name}`}
-                onClick={() => removeDraft(d.id)}
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-text-secondary opacity-0 transition-[opacity,color] hover:text-text-primary group-hover/draft:opacity-100"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <IconTip label="Delete draft">
+                <button
+                  type="button"
+                  aria-label={`Delete ${d.name}`}
+                  onClick={() => removeDraft(d.id)}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-control text-text-secondary opacity-0 transition-[opacity,color] hover:text-text-primary focus-visible:opacity-100 group-hover/draft:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </IconTip>
             </div>
           ))}
         </div>

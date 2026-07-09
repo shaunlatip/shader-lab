@@ -96,6 +96,18 @@ export const renderGlyph: Op = (canvas, p, u) => {
     l = clamp(Math.pow(l, contrast) + brightness, 0, 1);
     lumA[k] = l;
   }
+  // Auto contrast: stretch the 2nd–98th percentile of the cell-luma histogram
+  // to 0..1 so every source spans the full glyph ramp. Off (fallback) for
+  // stacks saved before the param existed — their output must not change.
+  if (pb(p, "autoContrast", false)) {
+    const sorted = Float32Array.from(lumA).sort();
+    const lo = sorted[Math.floor((sorted.length - 1) * 0.02)];
+    const hi = sorted[Math.floor((sorted.length - 1) * 0.98)];
+    const span = hi - lo;
+    if (span > 1e-4) {
+      for (let k = 0; k < lumA.length; k++) lumA[k] = clamp((lumA[k] - lo) / span, 0, 1);
+    }
+  }
   const edgeAt = (c: number, r: number) => {
     if (edgeAmt <= 0) return 0;
     const at = (cc: number, rr: number) => lumA[clamp(rr, 0, rows - 1) * cols + clamp(cc, 0, cols - 1)];
@@ -236,17 +248,60 @@ export const braille: Op = (canvas, p, u) => {
   ctx.textBaseline = "middle";
   ctx.font = `${cellH}px ui-monospace, monospace`;
   const dotCols = cols * 2;
+  const dotRows = rows * 4;
+
+  // Per-dot "ink demand" (0..1) in raised-dot polarity, so tone mapping and
+  // dithering share one scale regardless of ink/paper/invert. The cut point
+  // maps the legacy threshold semantics into demand space per polarity:
+  // brightDense on⟺lum>=threshold⟺demand>=threshold; darkDense
+  // on⟺lum<threshold⟺demand>1-threshold.
+  const demand = new Float32Array(dotCols * dotRows);
+  for (let y = 0; y < dotRows; y++) {
+    for (let x = 0; x < dotCols; x++) {
+      const i = (y * dotCols + x) * 4;
+      const lum = luma601(dots[i], dots[i + 1], dots[i + 2]) / 255;
+      let d = brightDense ? lum : 1 - lum;
+      if (invert) d = 1 - d;
+      demand[y * dotCols + x] = d;
+    }
+  }
+  const cut = brightDense !== invert ? threshold : 1 - threshold;
+
+  // Error diffusion (Floyd–Steinberg, serpentine) across the dot lattice —
+  // braille embossers dither for tone; a hard threshold posterizes. Off
+  // (fallback) for stacks saved before the param existed.
+  const on = new Uint8Array(dotCols * dotRows);
+  if (pb(p, "dither", false)) {
+    const buf = Float32Array.from(demand);
+    for (let y = 0; y < dotRows; y++) {
+      const ltr = y % 2 === 0;
+      for (let step = 0; step < dotCols; step++) {
+        const x = ltr ? step : dotCols - 1 - step;
+        const k = y * dotCols + x;
+        const v = buf[k];
+        const o = v >= cut ? 1 : 0;
+        on[k] = o;
+        const err = v - (o ? 1 : 0);
+        const xf = ltr ? x + 1 : x - 1;
+        const xb = ltr ? x - 1 : x + 1;
+        if (xf >= 0 && xf < dotCols) buf[y * dotCols + xf] += err * (7 / 16);
+        if (y + 1 < dotRows) {
+          if (xb >= 0 && xb < dotCols) buf[(y + 1) * dotCols + xb] += err * (3 / 16);
+          buf[(y + 1) * dotCols + x] += err * (5 / 16);
+          if (xf >= 0 && xf < dotCols) buf[(y + 1) * dotCols + xf] += err * (1 / 16);
+        }
+      }
+    }
+  } else {
+    for (let k = 0; k < demand.length; k++) on[k] = demand[k] >= cut ? 1 : 0;
+  }
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       let bits = 0;
       for (let dx = 0; dx < 2; dx++) {
         for (let dy = 0; dy < 4; dy++) {
-          const i = ((r * 4 + dy) * dotCols + (c * 2 + dx)) * 4;
-          const lum = luma601(dots[i], dots[i + 1], dots[i + 2]) / 255;
-          // raise dots where the glyph reads as "present" against the paper
-          let on = brightDense ? lum >= threshold : lum < threshold;
-          if (invert) on = !on;
-          if (on) bits |= BRAILLE_BIT[dx][dy];
+          if (on[(r * 4 + dy) * dotCols + (c * 2 + dx)]) bits |= BRAILLE_BIT[dx][dy];
         }
       }
       if (bits === 0) continue;
@@ -287,15 +342,126 @@ export const mosaic: Op = (canvas, p, u) => {
   }
 };
 
+// ---------------------------------------------------------------- lineArt · XDoG
+// Winnemöller extended difference-of-gaussians, the SHARPENED form:
+//   S = (1+p)*G_sigma - p*G_{k*sigma}   (k=1.6, p=20 fixed sharpen weight)
+//   E = 1 if S >= eps else 1 + tanh(phi*(S - eps));  color = mix(ink,paper,E)
+// The plain D = G1 - tau*G2 form compresses flat regions to ~0.01*luma, below
+// any usable eps — the whole image renders mid-grey. The sharpened form keeps
+// S at luma scale (flat region: S = luma), so eps acts as a tone threshold
+// (bright -> paper, dark -> ink) with DoG edge emphasis on top — the canonical
+// XDoG sketch look. Two full H+V separable gaussian passes over a Float32Array
+// luma plane, hoisted buffers (no per-pixel allocs). R_MAX=48 mirrors the GL
+// pass's constant loop bound (GLSL needs a compile-time bound; the CPU op
+// doesn't strictly need the cap but matches it 1:1 for parity/readability).
+const XDOG_R_MAX = 48;
+const XDOG_K = 1.6; // fixed size ratio between the two gaussians
+const XDOG_P = 20; // fixed sharpen weight: S = (1+p)*G1 - p*G2
+
+// Separable gaussian blur of a Float32Array plane (W×H, single channel).
+// weights w(i) = exp(-i^2/(2*sigma^2)) for i in -R..R, normalized to sum 1;
+// samples clamped to bounds (matches GL's texelAt clamp-to-edge reads).
+function gaussianBlur1ch(src: Float32Array, W: number, H: number, sigma: number, tmp: Float32Array, dst: Float32Array) {
+  const R = Math.min(XDOG_R_MAX, Math.ceil(3 * sigma));
+  const weights = new Float32Array(2 * R + 1);
+  let wsum = 0;
+  for (let i = -R; i <= R; i++) {
+    const w = Math.exp(-(i * i) / (2 * sigma * sigma));
+    weights[i + R] = w;
+    wsum += w;
+  }
+  for (let i = 0; i < weights.length; i++) weights[i] /= wsum;
+
+  // horizontal pass: src -> tmp
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      let acc = 0;
+      for (let i = -R; i <= R; i++) {
+        const xi = clamp(x + i, 0, W - 1);
+        acc += src[row + xi] * weights[i + R];
+      }
+      tmp[row + x] = acc;
+    }
+  }
+  // vertical pass: tmp -> dst
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let acc = 0;
+      for (let i = -R; i <= R; i++) {
+        const yi = clamp(y + i, 0, H - 1);
+        acc += tmp[yi * W + x] * weights[i + R];
+      }
+      dst[y * W + x] = acc;
+    }
+  }
+}
+
+function lineArtXdog(canvas: HTMLCanvasElement, p: Record<string, ParamValue>, u: number) {
+  const sigma = clamp(pn(p, "sigma", 2), 0.5, 8) * u;
+  // threshold slider [0,1] default 0.5 is REUSED as the tone threshold via
+  // eps = 0.2 + threshold*0.8 (default 0.5 -> eps 0.6, luma-scale — see the
+  // sharpened-form comment above). Documented identically in the GL pass.
+  const eps = 0.2 + clamp(pn(p, "threshold", 0.5), 0, 1) * 0.8;
+  const phi = clamp(pn(p, "edgeSoftness", 10), 1, 40); // = φ, the tanh soft-knee gain
+  const [inkR, inkG, inkB] = hexRGB(ps(p, "ink", "#16140f"));
+  const [paperR, paperG, paperB] = hexRGB(ps(p, "paper", "#f1ece4"));
+
+  const W = canvas.width, H = canvas.height;
+  const snap = tmpCanvas(canvas, W, H);
+  const snapCtx = ctx2d(snap);
+  snapCtx.drawImage(canvas, 0, 0);
+  const src = snapCtx.getImageData(0, 0, W, H).data;
+
+  const N = W * H;
+  const lumaPlane = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const j = i * 4;
+    lumaPlane[i] = luma601(src[j], src[j + 1], src[j + 2]) / 255;
+  }
+
+  const tmp = new Float32Array(N);
+  const blurSigma = new Float32Array(N);
+  const blurKSigma = new Float32Array(N);
+  gaussianBlur1ch(lumaPlane, W, H, sigma, tmp, blurSigma);
+  gaussianBlur1ch(lumaPlane, W, H, sigma * XDOG_K, tmp, blurKSigma);
+
+  const ctx = ctx2d(canvas);
+  const d = new Uint8ClampedArray(N * 4);
+  for (let i = 0; i < N; i++) {
+    const S = (1 + XDOG_P) * blurSigma[i] - XDOG_P * blurKSigma[i];
+    const x = S >= eps ? 1 : 1 + Math.tanh(phi * (S - eps));
+    const j = i * 4;
+    d[j] = inkR + (paperR - inkR) * x;
+    d[j + 1] = inkG + (paperG - inkG) * x;
+    d[j + 2] = inkB + (paperB - inkB) * x;
+    d[j + 3] = 255;
+  }
+
+  const out = ctx.createImageData(W, H);
+  out.data.set(d);
+  ctx.putImageData(out, 0, 0);
+}
+
 // ---------------------------------------------------------------- lineArt
 // Sobel-on-luma edge detector with outline, crosshatch, and combined ink modes.
 // Reads from a snapshot so Sobel never reads its own writes.
 export const lineArt: Op = (canvas, p, u) => {
   const mode = ps(p, "mode", "outline");
+  if (mode === "xdog") {
+    lineArtXdog(canvas, p, u);
+    return;
+  }
   const thickness = clamp(pn(p, "thickness", 1.5) * u, 1, 40);
   const threshold = clamp(pn(p, "threshold", 0.5), 0, 1);
+  // wiggle intentionally ignored for xdog (handled above, doesn't reach here) —
+  // xdog's gaussians already soften/stylize strokes, so a stochastic per-pixel
+  // sample-coordinate wiggle would just add noise on top of noise.
   const wiggleAmt = clamp(pn(p, "wiggle", 0), 0, 1);
-  const hatchSpacing = Math.max(2, pn(p, "hatchSpacing", 8) * u);
+  // Integer px: `y % s` on a fractional s is f32/f64-divergent (floor(y/s)
+  // flips near integers → whole hatch bands differ between engines); integer
+  // modulo is exact in both. Also crisper bands.
+  const hatchSpacing = Math.max(2, Math.round(pn(p, "hatchSpacing", 8) * u));
   const [inkR, inkG, inkB] = hexRGB(ps(p, "ink", "#16140f"));
   const [paperR, paperG, paperB] = hexRGB(ps(p, "paper", "#f1ece4"));
 
@@ -396,6 +562,10 @@ export const lineArt: Op = (canvas, p, u) => {
 const KW_R_CAP = 12;
 
 export const kuwahara: Op = (canvas, p, u) => {
+  if (ps(p, "quality", "fast") === "anisotropic") {
+    kuwaharaAniso(canvas, p, u);
+    return;
+  }
   const R = Math.min(KW_R_CAP, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
   const smooth = ps(p, "quality", "fast") === "smooth";
 
@@ -535,9 +705,216 @@ export const kuwahara: Op = (canvas, p, u) => {
   ctx.putImageData(out, 0, 0);
 };
 
+// ------------------------------------------- kuwahara · anisotropic (Kyprianidis)
+// CPU mirror of the GL 5-step pipeline in gl/shaders.ts (see the spec comment
+// there — ONE spec, both engines): structure tensor from Sobel on luma601/255,
+// 9×9 σ=2 gaussian tensor smooth, then the oriented Papari filter with smooth
+// polynomial sector weights. No 16-bit pack emulation here — the pack error
+// (1/65025) is negligible against the f32-vs-f64 trig divergence that sets
+// this mode's statistical parity tier. Radius caps at 8 (ellipse reach 2R=16).
+const KW_ANISO_R_CAP = 8;
+const KW_SECT: number[] = [];
+for (let k = 0; k < 8; k++) {
+  KW_SECT.push(Math.cos((k * Math.PI) / 4), Math.sin((k * Math.PI) / 4));
+}
+
+function kuwaharaAniso(canvas: HTMLCanvasElement, p: Record<string, ParamValue>, u: number): void {
+  const R = Math.min(KW_ANISO_R_CAP, Math.max(2, Math.round(pn(p, "radius", 4) * u)));
+  // slider is "stroke elongation" (higher = longer strokes); Kyprianidis α is
+  // its inverse. Same mapping as the GL runKuwaharaAniso.
+  const alpha = 1 / Math.min(2, Math.max(0.25, pn(p, "anisotropy", 1)));
+  const q = Math.min(16, Math.max(2, pn(p, "sharpness", 8))) * 0.5;
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const snap = tmpCanvas(canvas, W, H);
+  ctx2d(snap).drawImage(canvas, 0, 0);
+  const src = ctx2d(snap).getImageData(0, 0, W, H).data;
+  const ctx = ctx2d(canvas);
+  const d = new Uint8ClampedArray(W * H * 4);
+
+  // luma in [0,1] (bytes → /255, matching the GL texelLuma)
+  const lum = new Float32Array(W * H);
+  for (let i = 0, px = 0; px < W * H; px++, i += 4) {
+    lum[px] = luma601(src[i], src[i + 1], src[i + 2]) / 255;
+  }
+  const lumAt = (x: number, y: number) => lum[clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)];
+
+  // structure tensor (E=gx²/16, G=gy²/16, F=gx·gy/16 — same normalization as GL)
+  const tE = new Float32Array(W * H);
+  const tG = new Float32Array(W * H);
+  const tF = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const tl = lumAt(x - 1, y - 1);
+      const tc = lumAt(x, y - 1);
+      const tr = lumAt(x + 1, y - 1);
+      const ml = lumAt(x - 1, y);
+      const mr = lumAt(x + 1, y);
+      const bl = lumAt(x - 1, y + 1);
+      const bc = lumAt(x, y + 1);
+      const br = lumAt(x + 1, y + 1);
+      const gx = tr + 2 * mr + br - (tl + 2 * ml + bl);
+      const gy = bl + 2 * bc + br - (tl + 2 * tc + tr);
+      const i = y * W + x;
+      tE[i] = (gx * gx) / 16;
+      tG[i] = (gy * gy) / 16;
+      tF[i] = (gx * gy) / 16;
+    }
+  }
+
+  // 9×9 gaussian tensor smooth (σ=2), idx-clamped — same kernel as the GL pass
+  const KW_SMOOTH_R = 4;
+  const gw: number[] = [];
+  let gwSum = 0;
+  for (let j = -KW_SMOOTH_R; j <= KW_SMOOTH_R; j++)
+    for (let i = -KW_SMOOTH_R; i <= KW_SMOOTH_R; i++) {
+      const w = Math.exp(-(i * i + j * j) / 8);
+      gw.push(w);
+      gwSum += w;
+    }
+  const sE = new Float32Array(W * H);
+  const sG = new Float32Array(W * H);
+  const sF = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let aE = 0;
+      let aG = 0;
+      let aF = 0;
+      let gi = 0;
+      for (let j = -KW_SMOOTH_R; j <= KW_SMOOTH_R; j++) {
+        const py = clamp(y + j, 0, H - 1);
+        for (let i = -KW_SMOOTH_R; i <= KW_SMOOTH_R; i++, gi++) {
+          const px = clamp(x + i, 0, W - 1);
+          const w = gw[gi];
+          const ti = py * W + px;
+          aE += tE[ti] * w;
+          aG += tG[ti] * w;
+          aF += tF[ti] * w;
+        }
+      }
+      const i2 = y * W + x;
+      sE[i2] = aE / gwSum;
+      sG[i2] = aG / gwSum;
+      sF[i2] = aF / gwSum;
+    }
+  }
+
+  // oriented filter — mirrors KW_ANISO_MAIN step for step
+  const m = new Float64Array(8 * 3);
+  const s = new Float64Array(8 * 3);
+  const n = new Float64Array(8);
+  const wl0 = 0.299;
+  const wl1 = 0.587;
+  const wl2 = 0.114;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const ti = y * W + x;
+      const E = sE[ti];
+      const G = sG[ti];
+      const F = sF[ti];
+      const diff = E - G;
+      const rad = Math.sqrt(diff * diff + 4 * F * F);
+      const lam1 = (E + G + rad) * 0.5;
+      const lam2 = (E + G - rad) * 0.5;
+      const A = (lam1 - lam2) / (lam1 + lam2 + 1e-7);
+      const phi = 0.5 * Math.atan2(2 * F, diff) + Math.PI / 2;
+      const a = R * Math.min(2, Math.max(1, (alpha + A) / alpha));
+      const b = R * Math.min(1, Math.max(0.5, alpha / (alpha + A)));
+      const ca = Math.cos(phi);
+      const sa = Math.sin(phi);
+      m.fill(0);
+      s.fill(0);
+      n.fill(0);
+
+      const ci = ti * 4;
+      const c00r = src[ci];
+      const c00g = src[ci + 1];
+      const c00b = src[ci + 2];
+      const ext = Math.ceil(a);
+      for (let dy = -ext; dy <= ext; dy++) {
+        for (let dx = -ext; dx <= ext; dx++) {
+          const ux = (ca * dx + sa * dy) / a;
+          const uy = (-sa * dx + ca * dy) / b;
+          const vv = ux * ux + uy * uy;
+          if (vv > 1) continue;
+          const px = clamp(x + dx, 0, W - 1);
+          const py = clamp(y + dy, 0, H - 1);
+          const si = (py * W + px) * 4;
+          const cr = src[si] - c00r;
+          const cg = src[si + 1] - c00g;
+          const cb = src[si + 2] - c00b;
+          const ew = Math.exp(-3.125 * vv);
+          const vl = Math.sqrt(vv);
+          const inv = vl > 1e-6 ? 1 / vl : 0;
+          const vnx = ux * inv;
+          const vny = uy * inv;
+          for (let k = 0; k < 8; k++) {
+            let ck: number;
+            if (vl > 1e-6) {
+              ck = Math.max(0, vnx * KW_SECT[k * 2] + vny * KW_SECT[k * 2 + 1]);
+              ck = ck * ck;
+              ck = ck * ck;
+              ck = ck * ck; // cos^8
+            } else {
+              ck = 0.125; // centre pixel: split evenly across sectors
+            }
+            const w = ck * ew;
+            const mk = k * 3;
+            m[mk] += cr * w;
+            m[mk + 1] += cg * w;
+            m[mk + 2] += cb * w;
+            s[mk] += cr * cr * w;
+            s[mk + 1] += cg * cg * w;
+            s[mk + 2] += cb * cb * w;
+            n[k] += w;
+          }
+        }
+      }
+
+      let accR = 0;
+      let accG = 0;
+      let accB = 0;
+      let accW = 0;
+      for (let k = 0; k < 8; k++) {
+        if (n[k] < 1e-6) continue;
+        const invN = 1 / n[k];
+        const mk = k * 3;
+        const mr = m[mk] * invN;
+        const mg = m[mk + 1] * invN;
+        const mb = m[mk + 2] * invN;
+        const vr = s[mk] * invN - mr * mr;
+        const vg = s[mk + 1] * invN - mg * mg;
+        const vb = s[mk + 2] * invN - mb * mb;
+        const sig = Math.sqrt(Math.max(0, wl0 * vr + wl1 * vg + wl2 * vb));
+        const ak = 1 / (1 + Math.pow(sig, q));
+        accR += mr * ak;
+        accG += mg * ak;
+        accB += mb * ak;
+        accW += ak;
+      }
+      const pi = ti * 4;
+      const invW = accW > 0 ? 1 / accW : 0;
+      d[pi] = clamp(Math.round(accR * invW + c00r), 0, 255);
+      d[pi + 1] = clamp(Math.round(accG * invW + c00g), 0, 255);
+      d[pi + 2] = clamp(Math.round(accB * invW + c00b), 0, 255);
+      d[pi + 3] = 255;
+    }
+  }
+
+  const out = ctx.createImageData(W, H);
+  out.data.set(d);
+  ctx.putImageData(out, 0, 0);
+}
+
 // ---------------------------------------------------------------- lego
 // Posterised studded tiles: a flat brick fill per cell + a raised dot with a
-// light highlight and dark shade.
+// light highlight and dark shade, plus a fixed-direction 2D fake light per
+// stud (up-left) and a subtle brick-edge shade. CPU-only by design (lego is a
+// canvas-path composite, not a per-pixel shader-portable op) — constant-angle
+// atan2/trig here is over CONSTANTS (f64, computed once, not per-pixel data),
+// which the parity doctrine allows.
+const LEGO_LIGHT_ANGLE = Math.atan2(-0.65, -0.45); // light dir L = normalize(-0.45,-0.65)
 export const lego: Op = (canvas, p, u) => {
   const size = Math.max(6, pn(p, "size", 22) * u);
   const W = canvas.width,
@@ -550,6 +927,8 @@ export const lego: Op = (canvas, p, u) => {
   const ctx = ctx2d(canvas);
   ctx.clearRect(0, 0, W, H);
   const studR = Math.min(tw, th) * 0.3;
+  const lightDx = Math.cos(LEGO_LIGHT_ANGLE),
+    lightDy = Math.sin(LEGO_LIGHT_ANGLE);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const i = (r * cols + c) * 4;
@@ -566,6 +945,10 @@ export const lego: Op = (canvas, p, u) => {
       ctx.fillRect(x, y, tw, th * 0.12);
       ctx.fillStyle = `rgba(0,0,0,0.18)`;
       ctx.fillRect(x, y + th * 0.88, tw, th * 0.12);
+      // brick-edge shade: darken the tile's bottom-right 1px edge
+      ctx.fillStyle = `rgba(0,0,0,0.18)`;
+      ctx.fillRect(x, y + th - 1, tw, 1);
+      ctx.fillRect(x + tw - 1, y, 1, th);
       // stud
       const cx = x + tw / 2,
         cy = y + th / 2;
@@ -581,6 +964,20 @@ export const lego: Op = (canvas, p, u) => {
       ctx.arc(cx - studR * 0.28, cy - studR * 0.28, studR * 0.4, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(255,255,255,0.28)`;
       ctx.fill();
+      // fixed-direction fake light: highlight arc on the lit side (offset 1px
+      // toward the light), shadow arc on the opposite side.
+      const span = (100 * Math.PI) / 180;
+      const arcLineWidth = Math.max(1, studR * 0.28);
+      ctx.lineWidth = arcLineWidth;
+      ctx.beginPath();
+      ctx.arc(cx - lightDx, cy - lightDy, studR, LEGO_LIGHT_ANGLE - span, LEGO_LIGHT_ANGLE + span);
+      ctx.strokeStyle = `rgba(255,255,255,0.30)`;
+      ctx.stroke();
+      const shadowAngle = LEGO_LIGHT_ANGLE + Math.PI;
+      ctx.beginPath();
+      ctx.arc(cx + lightDx, cy + lightDy, studR, shadowAngle - span, shadowAngle + span);
+      ctx.strokeStyle = `rgba(0,0,0,0.30)`;
+      ctx.stroke();
     }
   }
 };

@@ -15,7 +15,34 @@
  * lab root and to its portaled menus/dialogs (which live outside that root).
  * Light-mode editorial surface → a soft light-gray hover fill. */
 .lab-chrome {
-  --color-accent: var(--color-shade-9);
+  --color-accent: var(--color-surface-hover);
+}
+
+/* Tailwind v4 defaults borders to currentColor; give every element the
+ * semantic default instead so a bare `border` class is never near-black.
+ * (Standard shadcn v4 compat rule.) */
+@layer base {
+  * {
+    border-color: var(--color-border-default);
+  }
+}
+
+/* Transparency checker — lives on the artwork canvas only, so it shows
+ * exclusively where the render is actually transparent. The stage behind
+ * stays a quiet solid. */
+.checker-transparency {
+  --checker-a: rgba(0, 0, 0, 0.06);
+  background-color: transparent;
+  background-image:
+    linear-gradient(45deg, var(--checker-a) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-a) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+[data-theme="dark"] .checker-transparency {
+  --checker-a: rgba(255, 255, 255, 0.07);
 }
 
 /* ── Global custom cursors (Nucleo) ──────────────────────────────────────
@@ -287,6 +314,9 @@ html:has(#intro-root[data-phase="reveal"]) {
      reads as prose. The test: if copying the text verbatim into a terminal would mean the
      same thing, mono works. If not, sans. See CLAUDE.md § Mono accent. */
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* Geist Pixel (Square cut) — the app wordmark only ("shaderlab" in the
+     header). Drives the `font-pixel` utility. */
+  --font-pixel: var(--font-geist-pixel-square), var(--font-geist-mono), ui-monospace, monospace;
 
   /* --- Font weights ---
      Switzer is a variable font, so any weight in 100–900 is a real cut.
@@ -358,8 +388,10 @@ html:has(#intro-root[data-phase="reveal"]) {
   /* --- Colors: Semantic tokens (role-based, consumed by components) ---
    * Raw shade scale stays available for the design system page + color-explore.
    * Component code prefers these roles so dark-mode inversion happens in one
-   * place via the [data-theme="dark"] block below @theme. */
-  --color-canvas: #ffffff;
+   * place via the [data-theme="dark"] block below @theme.
+   * Canvas is off-white (shade-11), never pure #fff — the chrome sits a
+   * step off the extremes so the artwork owns the brightest pixels. */
+  --color-canvas: var(--color-shade-11);
   --color-canvas-elevated: var(--color-shade-10);
   --color-canvas-inverted: var(--color-shade-1);
   --color-text-primary: var(--color-shade-1);
@@ -367,6 +399,36 @@ html:has(#intro-root[data-phase="reveal"]) {
   --color-text-inverse: var(--color-shade-11);
   --color-border-default: var(--color-shade-9);
   --color-border-strong: var(--color-shade-8);
+
+  /* --- Colors: interaction surfaces (theme-flipping hover/active fills) ---
+   * Use these instead of raw shades for hover/selected fills so dark mode
+   * inverts correctly ([data-theme="dark"] overrides below). */
+  --color-surface-hover: var(--color-shade-10);
+  --color-surface-active: var(--color-shade-9);
+
+  /* --- Colors: shadcn compatibility layer ---
+   * The ui/ primitives are stock shadcn and reference these roles. They were
+   * previously undefined here, so e.g. the outline button's bare `border`
+   * fell back to Tailwind v4's currentColor default — the source of the
+   * harsh near-black outlines. Mapped onto the semantic roles above so every
+   * shadcn part is automatically theme-correct. */
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-text-primary);
+  --color-popover: var(--color-canvas);
+  --color-popover-foreground: var(--color-text-primary);
+  --color-card: var(--color-canvas);
+  --color-card-foreground: var(--color-text-primary);
+  --color-primary: var(--color-canvas-inverted);
+  --color-primary-foreground: var(--color-text-inverse);
+  --color-secondary: var(--color-surface-hover);
+  --color-secondary-foreground: var(--color-text-primary);
+  --color-muted: var(--color-surface-hover);
+  --color-muted-foreground: var(--color-text-secondary);
+  --color-accent-foreground: var(--color-text-primary);
+  --color-border: var(--color-border-default);
+  --color-input: var(--color-border-default);
+  --color-ring: var(--color-shade-7);
+  --color-destructive: oklch(0.577 0.245 27.3);
 
   /* --- Inline link colors ---
    * Two-tone system for inline body links.
@@ -391,16 +453,23 @@ html:has(#intro-root[data-phase="reveal"]) {
   --container-container-sm: 1080px;
   --container-section: 840px;
 
-  /* --- Border radius --- */
-  --radius-card: 16px;
+  /* --- Border radius (register: control < card < frame < chip) ---
+   * Three working steps, no ad-hoc values in lab components:
+   * control = buttons/inputs/selects/swatches, card = effect cards/panels/
+   * popovers/preset tiles, frame = the stage canvas frame, chip = pills. */
+  --radius-control: 8px;
+  --radius-card: 10px;
   --radius-frame: 12px;
+  --radius-chip: 9999px;
 
-  /* --- Box shadows (1–5, each with two layers for depth) --- */
-  --shadow-1: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.24);
-  --shadow-2: 0 3px 6px rgba(0,0,0,.15), 0 2px 4px rgba(0,0,0,.12);
-  --shadow-3: 0 10px 20px rgba(0,0,0,.15), 0 3px 6px rgba(0,0,0,.10);
-  --shadow-4: 0 15px 25px rgba(0,0,0,.15), 0 5px 10px rgba(0,0,0,.05);
-  --shadow-5: 0 20px 40px rgba(0,0,0,.20), 0 8px 16px rgba(0,0,0,.08);
+  /* --- Box shadows (1–5, two-part: ambient + direct, Refactoring UI) ---
+   * Distinct at low elevation, near-invisible at high — the higher a surface
+   * floats, the softer and larger its shadow, never darker/harsher. */
+  --shadow-1: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.10);
+  --shadow-2: 0 3px 6px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.06);
+  --shadow-3: 0 10px 20px rgba(0,0,0,.08), 0 3px 6px rgba(0,0,0,.05);
+  --shadow-4: 0 15px 25px rgba(0,0,0,.08), 0 5px 10px rgba(0,0,0,.03);
+  --shadow-5: 0 20px 40px rgba(0,0,0,.10), 0 8px 16px rgba(0,0,0,.04);
 }
 
 /* --- Theme color-scheme + per-theme semantic overrides ---
@@ -434,7 +503,8 @@ html:has(#intro-root[data-phase="reveal"]) {
 [data-theme="light"] {
   color-scheme: light;
 
-  --color-canvas: #ffffff;
+  /* Off-white, not #fff — see @theme note. */
+  --color-canvas: var(--color-shade-11);
   --color-canvas-elevated: var(--color-shade-10);
   --color-canvas-inverted: var(--color-shade-1);
   --color-text-primary: var(--color-shade-1);
@@ -442,6 +512,8 @@ html:has(#intro-root[data-phase="reveal"]) {
   --color-text-inverse: var(--color-shade-11);
   --color-border-default: var(--color-shade-9);
   --color-border-strong: var(--color-shade-8);
+  --color-surface-hover: var(--color-shade-10);
+  --color-surface-active: var(--color-shade-9);
   --color-accent: var(--color-cinnabar-500);
 
   /* Shadow-as-border — a 1px ring plus two faint lift layers, for bordered
@@ -494,7 +566,9 @@ html:has(#intro-root[data-phase="reveal"]) {
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --color-canvas: var(--color-shade-2);
+  /* Off-black between shade-1 and shade-2 — deep enough to feel like a dark
+   * studio, lifted enough that shadows and borders still register. */
+  --color-canvas: oklch(0.19 0 0);
   --color-canvas-elevated: var(--color-shade-3);
   --color-canvas-inverted: var(--color-shade-11);
   --color-text-primary: var(--color-shade-11);
@@ -502,6 +576,8 @@ html:has(#intro-root[data-phase="reveal"]) {
   --color-text-inverse: var(--color-shade-1);
   --color-border-default: var(--color-shade-4);
   --color-border-strong: var(--color-shade-5);
+  --color-surface-hover: var(--color-shade-3);
+  --color-surface-active: var(--color-shade-4);
 
   /* Shadow-as-border, dark variant: a single white ring. The light-mode lift
    * layers read as dirt on a dark surface, so collapse to the ring alone. */
@@ -717,13 +793,12 @@ html:has(#intro-root[data-phase="reveal"]) {
     font-synthesis: none;
   }
 
-  /* Reserve the scrollbar gutter permanently on the document scroll container.
-   * Locking scroll (intro curtain, nav sheets → `overflow: hidden` on <html>)
-   * no longer removes the scrollbar's width, so content never shifts when the
-   * lock toggles. The reserved strip is filled by the slim custom thumb below,
-   * so it reads as a deliberate element rather than empty native chrome. */
+  /* The lab is a fixed 100dvh shell that never scrolls at the document level —
+   * each panel owns its own ScrollArea. So we must NOT reserve a document
+   * scrollbar gutter (`scrollbar-gutter: stable` here left a dead ~11px strip
+   * down the right edge of the app). Firefox thumb styling stays for the rare
+   * overflow case, but no width is reserved. */
   html {
-    scrollbar-gutter: stable;
     /* Firefox: slim thumb, no track. */
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -1095,13 +1170,15 @@ html:has(#intro-root[data-phase="reveal"]) {
    local fonts (Switzer, Inter, Host Grotesk, Lora) that this app doesn't load,
    and e.g. `--font-sans: var(--font-switzer), ...` has no fallback — so it's
    "guaranteed-invalid" in production and body text drops to the UA serif.
-   Redefine the tokens on <body>, where next/font's --font-work-sans / --font-archivo
-   / --font-geist-mono are actually set, against the fonts layout.tsx loads. */
+   Redefine the tokens on <body>, where next/font's variables are actually set,
+   against the fonts layout.tsx loads: General Sans (UI/body), Cabinet Grotesk
+   (display/titles), Geist Mono (values). */
 body {
-  --font-sans: var(--font-work-sans), system-ui, sans-serif;
-  --font-lab: var(--font-work-sans), system-ui, sans-serif;
-  --font-heading: var(--font-archivo), system-ui, sans-serif;
-  --font-nagel: var(--font-archivo), system-ui, sans-serif;
+  --font-sans: var(--font-general-sans), system-ui, sans-serif;
+  --font-lab: var(--font-general-sans), system-ui, sans-serif;
+  --font-heading: var(--font-cabinet-grotesk), system-ui, sans-serif;
+  --font-nagel: var(--font-cabinet-grotesk), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   --font-serif: Georgia, "Times New Roman", serif;
+  --font-pixel: var(--font-geist-pixel-square), var(--font-geist-mono), ui-monospace, monospace;
 }

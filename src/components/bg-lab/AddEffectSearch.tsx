@@ -73,7 +73,7 @@ export function AddEffectSearch() {
     <div ref={wrapRef} className="relative">
       <div
         className={cn(
-          "flex h-9 items-center gap-2 rounded-md border bg-canvas px-2.5 transition-colors",
+          "flex h-9 items-center gap-2 rounded-control border bg-canvas px-2.5 transition-colors",
           open ? "border-text-secondary" : "border-border-default hover:border-border-strong",
         )}
       >
@@ -98,7 +98,7 @@ export function AddEffectSearch() {
           ref={listRef}
           // Origin-aware enter (Emil): scales + fades in from the top edge near
           // the field, ease-out, well under 300ms.
-          className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-[320px] origin-top animate-in overflow-y-auto rounded-md border border-border-default bg-canvas p-1 shadow-5 duration-150 ease-out fade-in-0 zoom-in-95"
+          className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-[320px] origin-top animate-in overflow-y-auto rounded-card border border-border-default bg-canvas p-1 shadow-5 duration-150 ease-out fade-in-0 zoom-in-95"
         >
           {matches.length === 0 ? (
             <p className="px-2.5 py-2 text-[12px] text-text-secondary">No effect matches “{query}”.</p>

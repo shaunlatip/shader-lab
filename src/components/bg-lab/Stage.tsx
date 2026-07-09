@@ -8,6 +8,7 @@ import { IDENTITY, clampZoom, zoomToward, type View } from "@/lib/bg-lab/zoom";
 import type { Dims } from "@/lib/bg-lab/types";
 import { useBgLab } from "./BgLabProvider";
 import { useEngineSource } from "./SourceProvider";
+import { IconTip } from "./panel";
 import { VideoTransport } from "./VideoTransport";
 
 const PAD = 56;
@@ -19,7 +20,9 @@ function cssFit(boxW: number, boxH: number, ratio: number) {
     h = boxH - PAD;
     w = h * ratio;
   }
-  return { w: Math.max(1, w), h: Math.max(1, h) };
+  // Integer CSS size: fractional boxes antialias the bitmap edge and let the
+  // element background peek through as a hairline fringe around the artwork.
+  return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) };
 }
 
 export function Stage() {
@@ -53,6 +56,11 @@ export function Stage() {
 
   const ratio = aspectRatio(config.output.aspect);
   const fit = cssFit(box.w, box.h, ratio);
+  // Checker only when the render can actually be transparent — as a resting
+  // background it bleeds a light fringe around opaque artwork edges.
+  const canBeTransparent = config.stack.some(
+    (e) => e.enabled && e.params?.background === "transparent",
+  );
 
   // release the GL context (and CPU resources) when the lab unmounts —
   // browsers cap live WebGL contexts, so leaking one per mount eventually kills
@@ -209,16 +217,10 @@ export function Stage() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
-        style={{
-          // Light editorial stage — a barely-there checker so the canvas reads
-          // as artwork floating on paper.
-          backgroundColor: "#ececec",
-          backgroundImage:
-            "linear-gradient(45deg,#f5f5f5 25%,transparent 25%),linear-gradient(-45deg,#f5f5f5 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#f5f5f5 75%),linear-gradient(-45deg,transparent 75%,#f5f5f5 75%)",
-          backgroundSize: "22px 22px",
-          backgroundPosition: "0 0,0 11px,11px -11px,-11px 0",
-        }}
-        className="relative flex flex-1 cursor-grab touch-none items-center justify-center overflow-hidden active:cursor-grabbing"
+        // Quiet solid studio surface, one step below the panel canvas so the
+        // artwork reads as a print on a table. Theme-aware; transparency is
+        // signaled by the canvas element's own checker, not the stage.
+        className="relative flex flex-1 cursor-grab touch-none items-center justify-center overflow-hidden bg-shade-10 active:cursor-grabbing dark:bg-shade-1"
       >
         <canvas
           ref={canvasRef}
@@ -227,7 +229,10 @@ export function Stage() {
             height: fit.h,
             transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
           }}
-          className="rounded-[2px] shadow-5 ring-1 ring-black/[0.06] will-change-transform"
+          className={cn(
+            "rounded-[2px] shadow-5 ring-1 ring-black/[0.06] will-change-transform",
+            canBeTransparent && "checker-transparency",
+          )}
         />
         {loading && (
           <span className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-border-default bg-canvas/90 px-2 py-0.5 text-[11px] text-text-secondary shadow-2 backdrop-blur">
@@ -240,7 +245,7 @@ export function Stage() {
       {/* zoom HUD — light pill floating over the editorial stage */}
       <div className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border-default bg-canvas/90 px-1 py-1 text-text-primary shadow-3 backdrop-blur">
         {/* Original ↔ Edited preview toggle */}
-        <div className="pointer-events-auto flex items-center rounded-full bg-shade-9 p-0.5 text-[10px] font-medium">
+        <div className="pointer-events-auto flex items-center rounded-full bg-surface-active p-0.5 text-[10px] font-medium">
           {([["Original", true], ["Edited", false]] as const).map(([label, orig]) => (
             <button
               key={label}
@@ -256,28 +261,38 @@ export function Stage() {
           ))}
         </div>
         <div className="mx-0.5 h-4 w-px bg-border-default" />
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-shade-9 hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1 / 1.2, 0, 0))} aria-label="Zoom out">
-          <Minus className="h-3.5 w-3.5" />
-        </Button>
+        <IconTip label="Zoom out">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1 / 1.2, 0, 0))} aria-label="Zoom out">
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
         <button
           className="pointer-events-auto min-w-[44px] rounded text-center font-mono text-[11px] tabular-nums text-text-primary transition-[transform,color] duration-150 hover:text-text-secondary active:scale-95"
           onClick={() => setView(IDENTITY)}
         >
           {zoomPct}%
         </button>
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-shade-9 hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1.2, 0, 0))} aria-label="Zoom in">
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
+        <IconTip label="Zoom in">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1.2, 0, 0))} aria-label="Zoom in">
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
         <div className="mx-0.5 h-4 w-px bg-border-default" />
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-shade-9 hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Fit">
-          <Maximize className="h-3.5 w-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-shade-9 hover:text-text-primary active:scale-90" onClick={oneToOne} aria-label="100%">
-          <span className="font-mono text-[10px]">1:1</span>
-        </Button>
-        <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-shade-9 hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Reset">
-          <RotateCcw className="h-3.5 w-3.5" />
-        </Button>
+        <IconTip label="Fit to view">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Fit">
+            <Maximize className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
+        <IconTip label="Zoom to 100%">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={oneToOne} aria-label="100%">
+            <span className="font-mono text-[10px]">1:1</span>
+          </Button>
+        </IconTip>
+        <IconTip label="Reset view">
+          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Reset">
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
       </div>
     </div>
   );

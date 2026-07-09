@@ -24,11 +24,14 @@ interface LibCtx {
   saveStack: (name: string) => void;
   /** Save an arbitrary stack as a named effect-set (used by the AI flow). */
   saveStackFrom: (name: string, stack: Effect[]) => void;
-  /** Load a saved/built-in stack into the editor. */
+  /** Load a saved/built-in stack into the editor — never touches the source. */
   applyStack: (stack: Effect[]) => void;
   removeSaved: (id: string) => void;
   /** The draft the editor is currently bound to (updates write to it). */
   activeDraftId: string | null;
+  /** True when the editor differs from the active draft's saved state (or no
+   * draft is active yet) — i.e. there is something to save. */
+  dirty: boolean;
   /** Save the editor state: updates the active draft in place, else creates one. */
   saveDraft: (name: string) => void;
   /** Always fork a new draft (and make it active). */
@@ -46,7 +49,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [builtins] = useState<SavedEffect[]>(() => builtinSaved());
   const [saved, setSaved] = useState<SavedEffect[]>(() => loadSaved());
   const [drafts, setDrafts] = useState<Draft[]>(() => loadDrafts());
-  const [draftName, setDraftName] = useState("Untitled");
+  // Empty, not "Untitled" — the header/drafts inputs show the live
+  // suggestDraftName() result as a placeholder over this, and saveDraft falls
+  // back to that same auto name via `name.trim() || suggestDraftName(config)`.
+  // A non-empty initial value here would make that fallback dead code.
+  const [draftName, setDraftName] = useState("");
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   // Synchronous mirror of activeDraftId so a fast double-save resolves identity
   // before React commits the state update (prevents duplicate drafts).
@@ -72,6 +79,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   }, [drafts]);
 
+  // Cheap deep-compare: configs are small serializable objects with a stable
+  // key order (both sides originate from the same reducers/clones), so
+  // stringify equality is reliable here. Effect ids are stripped — loadDraft
+  // re-ids the stack, and identity shouldn't read as an unsaved change.
+  const active = activeDraftId ? drafts.find((d) => d.id === activeDraftId) : null;
+  const normalize = (c: typeof config) =>
+    JSON.stringify({ ...c, stack: c.stack.map(({ id: _id, ...rest }) => rest) });
+  const dirty = !active || normalize(active.config) !== normalize(config);
+
   const value = useMemo<LibCtx>(
     () => ({
       builtins,
@@ -79,6 +95,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       drafts,
       draftName,
       setDraftName,
+      dirty,
       saveStack: (name) =>
         setSaved((s) => [{ id: nanoid(8), name: name.trim() || "Untitled set", stack: reIdStack(config.stack) }, ...s]),
       saveStackFrom: (name, stack) =>
@@ -132,7 +149,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [builtins, saved, drafts, draftName, activeDraftId, config, dispatch],
+    [builtins, saved, drafts, draftName, activeDraftId, dirty, config, dispatch],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

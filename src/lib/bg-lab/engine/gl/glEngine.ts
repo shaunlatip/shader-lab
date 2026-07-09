@@ -1,10 +1,12 @@
 // BG Lab — WebGL2 engine. Same RenderEngine contract as the CPU engine. The base
 // (cover-fit source / solid) is composited on a 2D scratch canvas — reusing the
 // exact CPU letterboxing — then uploaded as the first texture. Each effect then
-// runs either as a GPU fragment pass (GL_OPS) over a ping-pong FBO chain, or, for
-// ops that don't shader cleanly (blur/bloom/grain/gradientMap/CMYK+FS-dither/
-// shaped-pixelate + every glyph/converter style), through a CPU bridge: blit the
-// current texture out, run the existing CPU op, re-upload. Correct for every op;
+// runs either as a GPU fragment pass (GL_OPS, single-pass or F5a multi-pass)
+// over the ping-pong FBO chain, or, for ops that don't shader cleanly
+// (CMYK+FS-dither/shaped-pixelate/gradientMap with >8 stops + every
+// glyph/converter style except kuwahara and lineArt, which have their own GL
+// passes — see shaders.ts), through a CPU bridge: blit the current texture
+// out, run the existing CPU op, re-upload. Correct for every op;
 // GPU-accelerated for the portable ones.
 
 import type { BgConfig, Dims, Effect, ParamValue } from "../../types";
@@ -15,9 +17,13 @@ import { drawTransformedSource } from "../cpu/sourceTransform";
 import { drawPattern } from "../cpu/patterns";
 import { OPS } from "../cpu/ops";
 import { GLContext, type GLTexture } from "./glContext";
-import { GL_OPS } from "./shaders";
+import { GL_OPS, type AssetTexKey, type MultiPassCtx, type PrePassCtx } from "./shaders";
+import { BLUE_NOISE_128, BLUE_NOISE_SIZE } from "../bluenoise";
 
 const DEFAULT_BG = "#cdd9e0";
+
+/** The 8 glyph-family EffectTypes that share the `glyphs` GL pass. */
+const GLYPH_TYPES = new Set<Effect["type"]>(["ascii", "blockChars", "crosshatch", "diagonal", "diamond", "lines", "mixed", "glyphDots"]);
 
 /** Ops that run on the CPU bridge instead of a GPU shader. */
 function shouldBridge(eff: Effect): boolean {
@@ -27,6 +33,22 @@ function shouldBridge(eff: Effect): boolean {
     // GL pass exists, but a few param modes still need the CPU path.
     if (t === "dither" && (eff.params.type === "floydSteinberg" || eff.params.type === "atkinson" || eff.params.type === "sierra")) return true;
     if (t === "pixelate" && eff.params.shape && eff.params.shape !== "square") return true;
+    if (t === "gradientMap" && Array.isArray(eff.params.stops) && (eff.params.stops as unknown[]).length > 8) return true;
+    if (GLYPH_TYPES.has(t)) {
+      // Exotic glyph configurations bridge to the CPU renderGlyph:
+      //  - background transparent/blurred: the GL pass only implements
+      //    paper/original (transparent has no meaningful GL compositing target
+      //    in this opaque-canvas pipeline; blurred needs the CPU blur op).
+      //  - non-normal blendMode: the GL pass always composites with a plain mix.
+      //  - dotGrid: decorative overlay the GL pass doesn't draw.
+      //  - randomize: CPU uses a sin-based hash for glyph index — f32/f64
+      //    divergent, and glyph index is a discrete decision, so this must not
+      //    run on GPU (a flipped index is a different glyph, not a rounding blip).
+      if (eff.params.background === "blurred" || eff.params.background === "transparent") return true;
+      if (eff.params.blendMode && eff.params.blendMode !== "normal") return true;
+      if (eff.params.dotGrid === true) return true;
+      if (eff.params.randomize === true) return true;
+    }
     return false;
   }
   return true; // no GPU pass → bridge to the CPU op
@@ -44,6 +66,17 @@ export class GLEngine implements RenderEngine {
   private base: HTMLCanvasElement | null = null;
   private bridge: HTMLCanvasElement | null = null;
   private t0 = 0;
+  /** F4 asset-texture cache: sampler-only textures for GpuPass.samplers. */
+  private assets = new Map<AssetTexKey, WebGLTexture>();
+  /** F5a same-size temp pool for multi-pass ops, keyed by name. Sized W×H;
+   * dropped wholesale on resize (ensureBuffers) and dispose. */
+  private temps = new Map<string, GLTexture>();
+  /** Param-dependent sampler cache for GpuPass.dynamicSamplers (e.g. glyph
+   * atlases), keyed by sampler `name`. Rebuilt when `sig` changes; the
+   * previous texture for that name is deleted first — atlases have no FBO. */
+  private dynAssets = new Map<string, { sig: string; tex: WebGLTexture }>();
+  /** Reused readback buffer for GpuPass.pre (grown on demand, never shrunk). */
+  private readBuf: Uint8Array | null = null;
 
   constructor() {
     this.glc = new GLContext();
@@ -55,10 +88,15 @@ export class GLEngine implements RenderEngine {
    * program cache. One failure must not stop the rest from being checked. */
   private selfCheck() {
     for (const [type, pass] of Object.entries(GL_OPS)) {
-      try {
-        this.glc.program(pass!.frag);
-      } catch (err) {
-        console.error(`[bg-lab] GL pass '${type}' failed to compile:`, err);
+      // `frags` also carries auxiliary frags of single-pass ops (pre-pass reductions)
+      const frags = [...(pass!.frag ? [pass!.frag] : []), ...(pass!.frags ?? [])];
+      if (!frags.length) console.error(`[bg-lab] GL pass '${type}' declares neither frag nor frags`);
+      for (const frag of frags) {
+        try {
+          this.glc.program(frag);
+        } catch (err) {
+          console.error(`[bg-lab] GL pass '${type}' failed to compile:`, err);
+        }
       }
     }
   }
@@ -75,10 +113,36 @@ export class GLEngine implements RenderEngine {
     if (this.a) gl.deleteTexture(this.a.tex), gl.deleteFramebuffer(this.a.fbo);
     if (this.b) gl.deleteTexture(this.b.tex), gl.deleteFramebuffer(this.b.fbo);
     if (this.baseTex) gl.deleteTexture(this.baseTex.tex), gl.deleteFramebuffer(this.baseTex.fbo);
+    this.temps.forEach((tx) => {
+      gl.deleteTexture(tx.tex);
+      gl.deleteFramebuffer(tx.fbo);
+    });
+    this.temps.clear();
     this.a = this.glc.createTexture(W, H);
     this.b = this.glc.createTexture(W, H);
     this.baseTex = this.glc.createTexture(W, H);
     this.baseSig = null; // buffer contents are gone — force a recomposite
+  }
+
+  /** F5a/F5b pooled temp target (key carries the size for sized temps). */
+  private tempTex(name: string, W: number, H: number): GLTexture {
+    let tx = this.temps.get(name);
+    if (!tx || tx.w !== W || tx.h !== H) {
+      if (tx) {
+        this.glc.gl.deleteTexture(tx.tex);
+        this.glc.gl.deleteFramebuffer(tx.fbo);
+      }
+      tx = this.glc.createTexture(W, H);
+      this.temps.set(name, tx);
+    }
+    return tx;
+  }
+
+  /** Resolve a MultiPassCtx dst handle back to its pooled GLTexture (dst is
+   * either a temp or the op output; output is handled by the caller). */
+  private tempByTex(tex: WebGLTexture): GLTexture {
+    for (const tx of this.temps.values()) if (tx.tex === tex) return tx;
+    throw new Error("multi-pass dst is neither ctx.output nor a ctx.temp");
   }
 
   private scratch(which: "base" | "bridge", W: number, H: number): HTMLCanvasElement {
@@ -162,10 +226,67 @@ export class GLEngine implements RenderEngine {
         continue;
       }
       const pass = GL_OPS[eff.type]!;
-      const prog = this.glc.program(pass.frag);
-      this.glc.pass(prog, other, [{ name: "u_tex", tex: cur.tex }], (g, pr) => {
+      if (pass.multi) {
+        // F5a: N same-size steps; the op's final step must write ctx.output.
+        const inputTex = cur;
+        const outputTex = other;
+        const ctx: MultiPassCtx = {
+          input: { tex: inputTex.tex },
+          output: { tex: outputTex.tex },
+          // F5b: temps may be a different size (mip chains). Pool key includes
+          // the size — two ops sharing a temp name at different sizes would
+          // otherwise thrash delete/create every frame.
+          temp: (name, w, h) => ({ tex: this.tempTex(`${name}@${w ?? W}x${h ?? H}`, w ?? W, h ?? H).tex }),
+          run: (frag, dst, reads, set) => {
+            const dstGL = dst.tex === outputTex.tex ? outputTex : this.tempByTex(dst.tex);
+            this.glc.pass(this.glc.program(frag), dstGL, reads, (g, pr) => {
+              // common uniforms describe the DESTINATION (u_dims drives the
+              // v_uv→px mapping); identical to W,H for same-size temps.
+              setCommon(this.glc, g, pr, dstGL.w, dstGL.h, u, t);
+              set?.(g, pr);
+            });
+          },
+        };
+        pass.multi(ctx, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
+        const tmp = cur;
+        cur = other;
+        other = tmp;
+        continue;
+      }
+      // Optional pre-pass (reduction + readback → extra uniforms), e.g. the
+      // glyph autoContrast percentile stretch. Runs against `cur` (the op's
+      // input) before the main frag samples it.
+      let preVals: Record<string, number> | undefined;
+      if (pass.pre) {
+        const preCtx: PrePassCtx = {
+          input: { tex: cur.tex },
+          temp: (name, w, h) => ({ tex: this.tempTex(`${name}@${w}x${h}`, w, h).tex }),
+          run: (frag, dst, reads, set) => {
+            const dstGL = this.tempByTex(dst.tex);
+            this.glc.pass(this.glc.program(frag), dstGL, reads, (g, pr) => {
+              setCommon(this.glc, g, pr, dstGL.w, dstGL.h, u, t);
+              set?.(g, pr);
+            });
+          },
+          read: (src) => {
+            const srcGL = this.tempByTex(src.tex);
+            this.readBuf = this.glc.readTexture(srcGL, this.readBuf ?? undefined);
+            return this.readBuf;
+          },
+        };
+        preVals = pass.pre(preCtx, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
+      }
+      const prog = this.glc.program(pass.frag!);
+      const reads = [{ name: "u_tex", tex: cur.tex }];
+      if (pass.samplers) for (const s of pass.samplers) reads.push({ name: s.name, tex: this.assetTex(s.key) });
+      if (pass.dynamicSamplers) {
+        for (const s of pass.dynamicSamplers(eff.params as Record<string, ParamValue>, u, { w: W, h: H })) {
+          reads.push({ name: s.name, tex: this.dynAssetTex(s.name, s.sig, s.build) });
+        }
+      }
+      this.glc.pass(prog, other, reads, (g, pr) => {
         setCommon(this.glc, g, pr, W, H, u, t);
-        pass.setUniforms(g, pr, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H });
+        pass.setUniforms?.(g, pr, eff.params as Record<string, ParamValue>, u, t, { w: W, h: H }, preVals);
       });
       const tmp = cur;
       cur = other;
@@ -183,8 +304,40 @@ export class GLEngine implements RenderEngine {
     tctx.drawImage(this.glc.canvas, 0, 0);
   }
 
+  /** Lazily build + cache an F4 asset texture. Keys are compile-time enumerable
+   * (AssetTexKey), so an unknown key is a type error, not a runtime miss. */
+  private assetTex(key: AssetTexKey): WebGLTexture {
+    const hit = this.assets.get(key);
+    if (hit) return hit;
+    // single case for now; extend per key as F4 consumers land (ASCII atlas…)
+    const tex = this.glc.createAssetTextureR8(BLUE_NOISE_SIZE, BLUE_NOISE_SIZE, BLUE_NOISE_128);
+    this.assets.set(key, tex);
+    return tex;
+  }
+
+  /** Resolve a GpuPass.dynamicSamplers entry: cache hit on matching `sig`,
+   * otherwise delete the previous texture for this `name` (if any) and build
+   * fresh via `build()` + createAssetTextureRGBA. */
+  private dynAssetTex(name: string, sig: string, build: () => HTMLCanvasElement): WebGLTexture {
+    const hit = this.dynAssets.get(name);
+    if (hit && hit.sig === sig) return hit.tex;
+    if (hit) this.glc.gl.deleteTexture(hit.tex);
+    const tex = this.glc.createAssetTextureRGBA(build());
+    this.dynAssets.set(name, { sig, tex });
+    return tex;
+  }
+
   dispose() {
     const gl = this.glc.gl;
+    this.assets.forEach((t) => gl.deleteTexture(t));
+    this.assets.clear();
+    this.dynAssets.forEach((d) => gl.deleteTexture(d.tex));
+    this.dynAssets.clear();
+    this.temps.forEach((tx) => {
+      gl.deleteTexture(tx.tex);
+      gl.deleteFramebuffer(tx.fbo);
+    });
+    this.temps.clear();
     if (this.a) gl.deleteTexture(this.a.tex), gl.deleteFramebuffer(this.a.fbo);
     if (this.b) gl.deleteTexture(this.b.tex), gl.deleteFramebuffer(this.b.fbo);
     if (this.baseTex) gl.deleteTexture(this.baseTex.tex), gl.deleteFramebuffer(this.baseTex.fbo);
