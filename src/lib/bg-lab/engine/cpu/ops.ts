@@ -2,7 +2,7 @@
 //   op(canvas, params, unit)  where unit = W/1000 (size-param scaling).
 // Ported from public/explorations/asset-bg/index.html and extended.
 
-import type { EffectType, GradientStop, ParamValue } from "../../types";
+import type { EffectType, ParamValue } from "../../types";
 import {
   clamp,
   ctx2d,
@@ -12,6 +12,7 @@ import {
   luma,
   luma601,
   linToSrgb,
+  mulberry32,
   orderedThreshold,
   pb,
   pixelateBlock,
@@ -25,6 +26,7 @@ import {
 
 import { renderGlyph, braille, mosaic, lego, lineArt, kuwahara } from "./converters";
 import { crtCurvature, glitch, filmDust, characterBloom } from "./postfx";
+import { lightLeak, gobo, caustic, relief, stain } from "./surface";
 import { BLUE_NOISE_128 } from "../bluenoise";
 
 type Op = (canvas: HTMLCanvasElement, p: Record<string, ParamValue>, u: number, t?: number) => void;
@@ -427,12 +429,18 @@ const grayscale: Op = (canvas, p) => {
 };
 
 // ---------------------------------------------------------------- grain
-const grain: Op = (canvas, p, u) => {
+// Seeded (mulberry32) so a still export repeats byte-for-byte and tiling holds.
+// `animate` advances the seed per frame (24/s cadence, matching the dither
+// temporal spec) instead of relying on Math.random — deterministic AND animated.
+const grain: Op = (canvas, p, u, t) => {
   const amount = pn(p, "amount", 0.14);
   if (amount <= 0) return;
   const size = Math.max(1, pn(p, "size", 1.5) * u);
   const mono = pb(p, "mono", true);
   const blend = ps(p, "blend", "soft-light");
+  const seed = Math.round(pn(p, "seed", 1));
+  const frame = pb(p, "animate", true) && t !== undefined ? Math.floor(t * 24) : 0;
+  const rnd = mulberry32((Math.imul(seed, 2654435761) ^ Math.imul(frame + 1, 40503)) >>> 0);
   const W = canvas.width,
     H = canvas.height;
   const nw = Math.max(1, Math.round(W / size)),
@@ -443,12 +451,12 @@ const grain: Op = (canvas, p, u) => {
     n = id.data;
   for (let i = 0; i < n.length; i += 4) {
     if (mono) {
-      const v = Math.random() * 255;
+      const v = rnd() * 255;
       n[i] = n[i + 1] = n[i + 2] = v;
     } else {
-      n[i] = Math.random() * 255;
-      n[i + 1] = Math.random() * 255;
-      n[i + 2] = Math.random() * 255;
+      n[i] = rnd() * 255;
+      n[i + 1] = rnd() * 255;
+      n[i + 2] = rnd() * 255;
     }
     n[i + 3] = 255;
   }
@@ -1387,4 +1395,10 @@ export const OPS: Record<EffectType, Op> = {
   glitch,
   filmDust,
   characterBloom,
+  // surface treatments (Editions light + paper)
+  lightLeak,
+  gobo,
+  caustic,
+  relief,
+  stain,
 };

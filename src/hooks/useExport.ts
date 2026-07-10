@@ -2,11 +2,13 @@ import { useRef, useState } from "react";
 import { createEngine, type EngineSource, type RenderEngine } from "@/lib/bg-lab/engine";
 import { MAX_EXPORT_PIXELS, outputDims, totalPixels } from "@/lib/bg-lab/resolution";
 import { createGifEncoder, createMp4Encoder, supportsMp4 } from "@/lib/bg-lab/export/encoders";
+import { zipStore } from "@/lib/bg-lab/export/zipStore";
 import type { StillJob, StillResult } from "@/lib/bg-lab/export/stillWorker";
 import type { BgConfig, Dims } from "@/lib/bg-lab/types";
 
 export type StillFormat = "png" | "jpg";
 export type ClipFormat = "mp4" | "gif";
+export type SequenceFormat = "pngseq";
 
 interface ExportCallbacks {
   onError?: (msg: string) => void;
@@ -33,11 +35,12 @@ const yieldToUI = () => new Promise<void>((res) => setTimeout(res, 0));
 // render runs off the main thread so huge exports don't freeze the UI.
 let stillWorker: Worker | null = null;
 
-function decomposeSource(src: EngineSource): Promise<Pick<StillJob, "image" | "solid" | "pattern">> {
+function decomposeSource(src: EngineSource): Promise<Pick<StillJob, "image" | "solid" | "pattern" | "gradient">> {
   if (src?.kind === "image") return createImageBitmap(src.image).then((image) => ({ image }));
   // A video still exports its current frame (same as the sync path's drawImage)
   if (src?.kind === "video") return createImageBitmap(src.video).then((image) => ({ image }));
   if (src?.kind === "pattern") return Promise.resolve({ pattern: src.pattern });
+  if (src?.kind === "gradient") return Promise.resolve({ gradient: src.gradient });
   return Promise.resolve({ solid: src?.kind === "solid" ? src.color : undefined });
 }
 
@@ -111,9 +114,20 @@ export function useExport() {
       return;
     }
     setExporting(true);
+    setProgress(0);
     await yieldToUI();
     const mime = format === "jpg" ? "image/jpeg" : "image/png";
     const quality = format === "jpg" ? 0.92 : undefined;
+    // The worker render has no granular progress signal (it's one message in,
+    // one blob back), so drive an honest ease-out ramp that approaches — but
+    // never reaches — 92% while we wait. The jump to 100% only happens the
+    // instant the blob actually resolves, so the bar never claims "done"
+    // before the file exists.
+    let synthetic = 0;
+    const tick = setInterval(() => {
+      synthetic += (0.92 - synthetic) * 0.12;
+      setProgress(synthetic);
+    }, 120);
     try {
       // ARCHITECTURE CONSTRAINT: still export uses the CPU engine — the CPU op is
       // the source of truth (GL is the preview accelerator). Don't switch this to
@@ -135,17 +149,21 @@ export function useExport() {
           canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))), mime, quality);
         });
       }
-      setExporting(false);
+      clearInterval(tick);
+      setProgress(1);
       const name = `background-${dims.W}x${dims.H}.${format}`;
       download(blob, name);
       cb?.onDone?.(name);
     } catch (err) {
-      setExporting(false);
+      clearInterval(tick);
       cb?.onError?.(
         err instanceof Error && err.name === "SecurityError"
           ? "This image can't be exported (cross-origin). Try uploading it instead."
           : "Export failed.",
       );
+    } finally {
+      setExporting(false);
+      setProgress(0);
     }
   }
 
@@ -221,8 +239,62 @@ export function useExport() {
     }
   }
 
+  // PNG-sequence (.zip): the reliable alpha-video route. Renders each frame on
+  // the CPU engine (export truth), packs them store-only. Feed the frames into
+  // the ffmpeg alpha pipeline (see docs/alpha-video.md) for VP9/HEVC-alpha video —
+  // in-browser alpha encode is still gappy in 2026, so this is the dependable path.
+  async function exportSequence(
+    config: BgConfig,
+    engineSource: EngineSource,
+    opts: { fps?: number; seconds?: number; scale?: number } = {},
+    cb?: ExportCallbacks,
+  ) {
+    const fps = opts.fps ?? 24;
+    const seconds = Math.min(MAX_CLIP_SECONDS, Math.max(0.1, opts.seconds ?? 3));
+    const frames = Math.max(1, Math.round(fps * seconds));
+    const dims = outputDims(config.output.aspect, config.output.longEdge * (opts.scale ?? 1));
+    if (totalPixels(dims) > MAX_EXPORT_PIXELS) {
+      cb?.onError?.(
+        `That's ${(totalPixels(dims) / 1e6).toFixed(0)} MP/frame — over the ${(MAX_EXPORT_PIXELS / 1e6).toFixed(0)} MP cap. Lower the resolution or scale.`,
+      );
+      return;
+    }
+    setExporting(true);
+    setProgress(0);
+    try {
+      const engine = cpu();
+      engine.setSource(engineSource);
+      const canvas = document.createElement("canvas");
+      const files: { name: string; data: Uint8Array }[] = [];
+      const digits = String(frames).length;
+      for (let i = 0; i < frames; i++) {
+        const t = i / fps; // frame clock; animated ops (grain) advance per frame and loop
+        await yieldToUI();
+        engine.render(canvas, config, dims, t);
+        const blob = await new Promise<Blob>((res, rej) =>
+          canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob returned null"))), "image/png"),
+        );
+        files.push({ name: `frame_${String(i).padStart(digits, "0")}.png`, data: new Uint8Array(await blob.arrayBuffer()) });
+        setProgress((i + 1) / frames);
+      }
+      const zip = zipStore(files);
+      const name = `background-${dims.W}x${dims.H}-${fps}fps-${frames}f.zip`;
+      download(zip, name);
+      cb?.onDone?.(name);
+    } catch (err) {
+      cb?.onError?.(
+        err instanceof Error && err.name === "SecurityError"
+          ? "This can't be exported (cross-origin source)."
+          : "Sequence export failed.",
+      );
+    } finally {
+      setExporting(false);
+      setProgress(0);
+    }
+  }
+
   // back-compat alias
   const exportPng = (config: BgConfig, src: EngineSource, cb?: ExportCallbacks) => exportStill(config, src, {}, cb);
 
-  return { exporting, progress, exportStill, exportClip, exportPng };
+  return { exporting, progress, exportStill, exportClip, exportSequence, exportPng };
 }

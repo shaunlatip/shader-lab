@@ -45,7 +45,9 @@ export function LabHeader({
             <PanelLeft className="h-4 w-4" />
           </Button>
         </IconTip>
-        <span className="font-pixel text-[15px] text-text-primary">shaderlab</span>
+        {/* The pixel font's metrics sit visually high in its line box — nudge
+            down to optically center against the icon button beside it. */}
+        <span className="translate-y-[3px] font-pixel text-[15px] text-text-primary">shaderlab</span>
       </div>
       {/* Centered in the full header width (not just the left group) via the
           grid's 1fr/auto/1fr columns — stays centered as the side groups

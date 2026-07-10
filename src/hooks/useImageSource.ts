@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { galleryUrl } from "@/lib/bg-lab/presets";
 import { DEFAULT_PATTERN } from "@/lib/bg-lab/patternCatalog";
+import { DEFAULT_GRADIENT } from "@/lib/bg-lab/gradientCatalog";
 import type { SourceState } from "@/lib/bg-lab/types";
 import type { EngineSource } from "@/lib/bg-lab/engine";
 
@@ -96,6 +97,14 @@ export function useImageSource(source: SourceState): ResolvedSource {
       });
       return;
     }
+    if (source.mode === "gradient") {
+      setState({
+        engineSource: { kind: "gradient", gradient: source.gradient ?? DEFAULT_GRADIENT },
+        loading: false,
+        error: null,
+      });
+      return;
+    }
     if (source.mode === "solid") {
       setState({ engineSource: { kind: "solid", color: source.solidColor }, loading: false, error: null });
       return;
@@ -129,7 +138,7 @@ export function useImageSource(source: SourceState): ResolvedSource {
         if (reqRef.current !== req) return;
         setState({ engineSource: null, loading: false, error: "Couldn't load that image." });
       });
-  }, [source.mode, source.imageId, source.solidColor, source.pattern]);
+  }, [source.mode, source.imageId, source.solidColor, source.pattern, source.gradient]);
 
   return state;
 }

@@ -9,7 +9,7 @@
 // serializes on its `exporting` flag).
 
 import { createEngine, type EngineSource } from "../engine";
-import type { BgConfig, Dims, PatternState } from "../types";
+import type { BgConfig, Dims, GradientState, PatternState } from "../types";
 
 export interface StillJob {
   config: BgConfig;
@@ -19,6 +19,7 @@ export interface StillJob {
   image?: ImageBitmap;
   solid?: string;
   pattern?: PatternState;
+  gradient?: GradientState;
 }
 
 export type StillResult = { ok: true; blob: Blob } | { ok: false; error: string; name?: string };
@@ -37,7 +38,9 @@ scope.onmessage = async (ev: MessageEvent<StillJob>) => {
       ? { kind: "image", image: job.image }
       : job.pattern
         ? { kind: "pattern", pattern: job.pattern }
-        : { kind: "solid", color: job.solid ?? "#cdd9e0" };
+        : job.gradient
+          ? { kind: "gradient", gradient: job.gradient }
+          : { kind: "solid", color: job.solid ?? "#cdd9e0" };
     const canvas = new OffscreenCanvas(job.dims.W, job.dims.H);
     const engine = createEngine("cpu");
     try {

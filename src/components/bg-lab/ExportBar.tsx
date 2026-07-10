@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ASPECTS, outputDims } from "@/lib/bg-lab/resolution";
-import { useExport, type ClipFormat, type StillFormat } from "@/hooks/useExport";
+import { useExport, type ClipFormat, type SequenceFormat, type StillFormat } from "@/hooks/useExport";
 import { useBgLab } from "./BgLabProvider";
 import { useEngineSource } from "./SourceProvider";
 import { CollapsibleSection } from "./panel";
@@ -20,14 +20,14 @@ import { CollapsibleSection } from "./panel";
 const ROW = "grid grid-cols-[52px_1fr] items-center gap-2";
 const LABEL = "text-[11px] text-text-secondary";
 
-type Format = StillFormat | ClipFormat;
+type Format = StillFormat | ClipFormat | SequenceFormat;
 const SELECT_CONTENT = "lab-chrome font-lab border-border-default bg-canvas text-text-primary";
 const SELECT_ITEM = "text-xs focus:bg-canvas-inverted/10 focus:text-text-primary";
 
 export function ExportBar() {
   const { config, dispatch } = useBgLab();
   const { engineSource } = useEngineSource();
-  const { exporting, progress, exportStill, exportClip } = useExport();
+  const { exporting, progress, exportStill, exportClip, exportSequence } = useExport();
   const { aspect, longEdge } = config.output;
   const isCustom = typeof aspect !== "string";
   const dims = outputDims(aspect, longEdge);
@@ -36,6 +36,7 @@ export function ExportBar() {
   const [scale, setScale] = useState(1);
   const [fps, setFps] = useState(30);
   const isClip = format === "mp4" || format === "gif";
+  const isSeq = format === "pngseq";
 
   // Default the format to the source kind (video→mp4, image/solid→png), but only
   // when the current pick is wrong for the new kind — never override a manual
@@ -56,9 +57,17 @@ export function ExportBar() {
       onError: (m: string) => toast.error(m),
       onDone: (n: string) => toast.success("Exported", { description: n }),
     };
-    if (isClip) exportClip(config, engineSource, { format: format as ClipFormat, fps, scale }, cb);
+    if (isSeq) exportSequence(config, engineSource, { fps, scale }, cb);
+    else if (isClip) exportClip(config, engineSource, { format: format as ClipFormat, fps, scale }, cb);
     else exportStill(config, engineSource, { format: format as StillFormat, scale }, cb);
   }
+
+  // `progress` is a real 0..1 signal for every export kind now (stills drive
+  // an honest synthetic ramp — see useExport) so the % is always meaningful,
+  // not just for clip/sequence.
+  const pct = Math.round(progress * 100);
+  const verb = isSeq ? "Rendering" : isClip ? "Encoding" : "Exporting";
+  const label = exporting ? `${verb}… ${pct}%` : isSeq ? "Export PNG sequence" : `Export ${format.toUpperCase()}`;
 
   return (
     <div className="border-t border-border-default bg-canvas p-3">
@@ -148,6 +157,7 @@ export function ExportBar() {
             <SelectItem value="jpg" className={SELECT_ITEM}>JPG</SelectItem>
             <SelectItem value="mp4" className={SELECT_ITEM}>MP4 (video)</SelectItem>
             <SelectItem value="gif" className={SELECT_ITEM}>GIF (video)</SelectItem>
+            <SelectItem value="pngseq" className={SELECT_ITEM}>PNG sequence (.zip)</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -171,7 +181,7 @@ export function ExportBar() {
         </Select>
       </div>
 
-      {isClip && (
+      {(isClip || isSeq) && (
         <div className={ROW}>
           <span className={LABEL}>FPS</span>
           <Input
@@ -194,20 +204,35 @@ export function ExportBar() {
             : "Exports a 3s loop of the animated effects."}
         </p>
       )}
+      {isSeq && (
+        <p className="text-[10px] leading-snug text-text-secondary">
+          A 3s PNG frame sequence (.zip) at full resolution — feed to the ffmpeg
+          alpha pipeline for VP9/HEVC-alpha video (see docs/alpha-video.md).
+        </p>
+      )}
 
       <Button
         type="button"
         disabled={exporting}
-        // The one emphasized CTA — solid dark on the light panel.
-        className="mt-0.5 h-9 w-full bg-text-primary text-canvas transition-[transform,background-color] duration-150 hover:bg-text-primary/90 active:scale-[0.99]"
+        // The one emphasized CTA — solid dark on the light panel. While
+        // exporting, a translucent overlay fills left→right with progress;
+        // it's `bg-canvas` (the button's own opposite-extreme token) so it
+        // stays theme-correct without a new color, and the label keeps its
+        // normal bg-text-primary/text-canvas contrast the whole time since
+        // the base layer underneath never changes.
+        className="relative mt-0.5 h-9 w-full overflow-hidden bg-text-primary text-canvas transition-[transform,background-color] duration-150 hover:bg-text-primary/90 active:scale-[0.99]"
         onClick={run}
       >
-        <Download className="mr-1.5 h-3.5 w-3.5" />
-        {exporting
-          ? isClip
-            ? `Encoding… ${Math.round(progress * 100)}%`
-            : "Exporting…"
-          : `Export ${format.toUpperCase()}`}
+        {exporting && (
+          <div
+            className="absolute inset-y-0 left-0 bg-canvas/15 transition-[width] duration-150 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        )}
+        <span className="relative z-10 inline-flex items-center">
+          <Download className="mr-1.5 h-3.5 w-3.5" />
+          {label}
+        </span>
       </Button>
         </div>
       </CollapsibleSection>

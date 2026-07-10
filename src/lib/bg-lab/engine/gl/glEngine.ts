@@ -15,6 +15,7 @@ import type { EngineSource, RenderEngine } from "../types";
 import { ctx2d } from "../cpu/util";
 import { drawTransformedSource } from "../cpu/sourceTransform";
 import { drawPattern } from "../cpu/patterns";
+import { drawGradient } from "../cpu/gradient";
 import { OPS } from "../cpu/ops";
 import { GLContext, type GLTexture } from "./glContext";
 import { GL_OPS, type AssetTexKey, type MultiPassCtx, type PrePassCtx } from "./shaders";
@@ -178,6 +179,7 @@ export class GLEngine implements RenderEngine {
       k: this.src?.kind ?? "none",
       t: config.source.transform ?? null,
       p: this.src?.kind === "pattern" ? this.src.pattern : null,
+      g: this.src?.kind === "gradient" ? this.src.gradient : null,
       c: this.src?.kind === "solid" ? this.src.color : null,
       W,
       H,
@@ -198,6 +200,8 @@ export class GLEngine implements RenderEngine {
         }
       } else if (this.src && this.src.kind === "pattern") {
         drawPattern(bctx, W, H, this.src.pattern, u);
+      } else if (this.src && this.src.kind === "gradient") {
+        drawGradient(bctx, W, H, this.src.gradient);
       } else {
         bctx.fillStyle = this.src && this.src.kind === "solid" ? this.src.color : DEFAULT_BG;
         bctx.fillRect(0, 0, W, H);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Maximize, Minus, Plus, RotateCcw } from "lucide-react";
+import { CreditCard, Grid3x3, Maximize, Minus, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { createEngine, preferredEngineId, type RenderEngine } from "@/lib/bg-lab/engine";
@@ -12,6 +12,28 @@ import { IconTip } from "./panel";
 import { VideoTransport } from "./VideoTransport";
 
 const PAD = 56;
+
+// Preview-only overlay: a placeholder UI card centered on the artwork plus a
+// dashed safe-zone guide (keep the texture calm here so focal UI wins). Never
+// rendered into the canvas / export — a DOM overlay tracking the canvas rect.
+function CardOverlay({ mode }: { mode: "light" | "dark" }) {
+  const light = mode === "light";
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[2px]">
+      {/* safe zone — keep the center calm for focal UI */}
+      <div className="absolute inset-[14%] rounded-[6px] border border-dashed border-white/40 mix-blend-overlay" />
+      {/* placeholder card */}
+      <div
+        className={cn(
+          "absolute left-1/2 top-1/2 flex h-[28%] w-[46%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-[10px] shadow-[0_12px_40px_rgba(0,0,0,0.28)]",
+          light ? "bg-white text-neutral-900" : "bg-neutral-900 text-white ring-1 ring-white/10",
+        )}
+      >
+        <span className="text-[clamp(11px,2.2vw,18px)] font-semibold tracking-tight">Your UI here</span>
+      </div>
+    </div>
+  );
+}
 
 function cssFit(boxW: number, boxH: number, ratio: number) {
   let w = boxW - PAD;
@@ -53,6 +75,16 @@ export function Stage() {
   const [view, setView] = useState<View>(IDENTITY);
   // "Original" shows the untouched source (renders with an empty stack).
   const [showOriginal, setShowOriginal] = useState(false);
+  // Card-composite preview: drop a placeholder UI panel + safe-zone guide over
+  // the canvas so you can judge whether a light/dark card reads against the
+  // background WHILE editing. Pure Stage-local state — never touches BgConfig,
+  // so it can't leak into the config-as-JSON moat or the export.
+  const [cardMode, setCardMode] = useState<"off" | "light" | "dark">("off");
+  const nextCard = { off: "light", light: "dark", dark: "off" } as const;
+  // Tile preview: repeat the current render 3×3 so seams are obvious — the check
+  // that turns one render into a reusable seamless texture asset.
+  const [tile, setTile] = useState(false);
+  const [tileSrc, setTileSrc] = useState<string | null>(null);
 
   const ratio = aspectRatio(config.output.aspect);
   const fit = cssFit(box.w, box.h, ratio);
@@ -170,6 +202,24 @@ export function Stage() {
     };
   }, [config, engineSource, dims, showOriginal]);
 
+  // snapshot the canvas after a frame paints so the tile overlay repeats the
+  // current render. Re-grab on any change that alters the pixels.
+  useEffect(() => {
+    // When off, the overlay is hidden by `tile && tileSrc` — no setState needed
+    // here (avoids a cascading-render). The snapshot re-grabs after a frame paints.
+    if (!tile) return;
+    const c = canvasRef.current;
+    if (!c) return;
+    const raf = requestAnimationFrame(() => {
+      try {
+        setTileSrc(c.toDataURL());
+      } catch {
+        /* tainted/oversized canvas — leave prior snapshot */
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [tile, config, dims, showOriginal, engineSource]);
+
   // wheel zoom toward cursor
   const onWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -222,18 +272,34 @@ export function Stage() {
         // signaled by the canvas element's own checker, not the stage.
         className="relative flex flex-1 cursor-grab touch-none items-center justify-center overflow-hidden bg-shade-10 active:cursor-grabbing dark:bg-shade-1"
       >
-        <canvas
-          ref={canvasRef}
+        <div
           style={{
             width: fit.w,
             height: fit.h,
             transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
           }}
-          className={cn(
-            "rounded-[2px] shadow-5 ring-1 ring-black/[0.06] will-change-transform",
-            canBeTransparent && "checker-transparency",
+          className="relative will-change-transform"
+        >
+          <canvas
+            ref={canvasRef}
+            style={{ width: "100%", height: "100%", display: "block" }}
+            className={cn(
+              "rounded-[2px] shadow-5 ring-1 ring-black/[0.06]",
+              canBeTransparent && "checker-transparency",
+            )}
+          />
+          {cardMode !== "off" && <CardOverlay mode={cardMode} />}
+          {tile && tileSrc && (
+            <div
+              className="pointer-events-none absolute inset-0 rounded-[2px]"
+              style={{
+                backgroundImage: `url(${tileSrc})`,
+                backgroundSize: "33.333% 33.333%",
+                backgroundRepeat: "repeat",
+              }}
+            />
           )}
-        />
+        </div>
         {loading && (
           <span className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-border-default bg-canvas/90 px-2 py-0.5 text-[11px] text-text-secondary shadow-2 backdrop-blur">
             loading…
@@ -260,6 +326,37 @@ export function Stage() {
             </button>
           ))}
         </div>
+        <div className="mx-0.5 h-4 w-px bg-border-default" />
+        <IconTip label={cardMode === "off" ? "Preview a UI card" : cardMode === "light" ? "Light card (click for dark)" : "Dark card (click to hide)"}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className={cn(
+              "pointer-events-auto transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90",
+              cardMode === "off" ? "text-text-secondary" : "text-text-primary",
+            )}
+            onClick={() => setCardMode((m) => nextCard[m])}
+            aria-label="Toggle card preview"
+            aria-pressed={cardMode !== "off"}
+          >
+            <CreditCard className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
+        <IconTip label={tile ? "Hide tile preview" : "Preview as 3×3 tile (check seams)"}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className={cn(
+              "pointer-events-auto transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90",
+              tile ? "text-text-primary" : "text-text-secondary",
+            )}
+            onClick={() => setTile((v) => !v)}
+            aria-label="Toggle tile preview"
+            aria-pressed={tile}
+          >
+            <Grid3x3 className="h-3.5 w-3.5" />
+          </Button>
+        </IconTip>
         <div className="mx-0.5 h-4 w-px bg-border-default" />
         <IconTip label="Zoom out">
           <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1 / 1.2, 0, 0))} aria-label="Zoom out">
