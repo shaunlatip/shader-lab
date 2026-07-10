@@ -6,6 +6,19 @@ import { BLUE_NOISE_128 } from "../bluenoise";
 export const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+/** Seeded PRNG (mulberry32) — deterministic noise so exports repeat byte-for-byte
+ * and tiles stay stable. Replaces Math.random in the seedable ops. */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export function hexRGB(h: string): [number, number, number] {
   const s = h.replace("#", "");
   return [parseInt(s.slice(0, 2), 16) || 0, parseInt(s.slice(2, 4), 16) || 0, parseInt(s.slice(4, 6), 16) || 0];

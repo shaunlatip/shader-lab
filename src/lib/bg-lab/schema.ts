@@ -5,8 +5,9 @@
 import { nanoid } from "nanoid";
 import { EFFECT_CATALOG, EFFECT_ORDER, controlDefault, defaultParams, type ControlSpec } from "./catalog";
 import { DEFAULT_PATTERN, PATTERN_CONTROLS } from "./patternCatalog";
+import { DEFAULT_GRADIENT, GRADIENT_CONTROLS } from "./gradientCatalog";
 import { makeDefaultConfig } from "./presets";
-import type { BgConfig, Effect, EffectType, GradientStop, ParamValue, PatternState } from "./types";
+import type { BgConfig, Effect, EffectType, GradientState, GradientStop, ParamValue, PatternState } from "./types";
 
 const clampNum = (v: unknown, min: number, max: number, step: number, def: number): number => {
   let n = typeof v === "number" ? v : Number(v);
@@ -63,6 +64,40 @@ function clampPattern(raw: unknown): PatternState {
   return out as unknown as PatternState;
 }
 
+/** coerce a pasted gradient block to a valid GradientState (total, like clampPattern) */
+function clampGradient(raw: unknown): GradientState {
+  const src = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  // mesh (string[]) isn't a ParamValue — keep it out of the clamp record and
+  // validate it separately below.
+  const out: Record<string, ParamValue> = {
+    type: DEFAULT_GRADIENT.type,
+    angle: DEFAULT_GRADIENT.angle,
+    cx: DEFAULT_GRADIENT.cx,
+    cy: DEFAULT_GRADIENT.cy,
+    radius: DEFAULT_GRADIENT.radius,
+    stops: DEFAULT_GRADIENT.stops,
+    scale: DEFAULT_GRADIENT.scale ?? 3,
+    warp: DEFAULT_GRADIENT.warp ?? 0.55,
+    seed: DEFAULT_GRADIENT.seed ?? 1,
+    seamless: DEFAULT_GRADIENT.seamless ?? false,
+    feed: DEFAULT_GRADIENT.feed ?? 0.037,
+    kill: DEFAULT_GRADIENT.kill ?? 0.06,
+  };
+  for (const spec of GRADIENT_CONTROLS) {
+    if (spec.key in src) out[spec.key] = clampOne(spec, src[spec.key]);
+  }
+  const g = out as unknown as GradientState;
+  // mesh: 4 hex corners [TL,TR,BR,BL] — validated separately (not a ControlSpec).
+  const rawMesh = src.mesh;
+  const fallback = DEFAULT_GRADIENT.mesh ?? ["#000000", "#000000", "#000000", "#000000"];
+  g.mesh = Array.isArray(rawMesh)
+    ? Array.from({ length: 4 }, (_, i) =>
+        typeof rawMesh[i] === "string" && /^#[0-9a-fA-F]{6}$/.test(rawMesh[i] as string) ? (rawMesh[i] as string) : fallback[i],
+      )
+    : fallback;
+  return g;
+}
+
 /** parse + validate a pasted config; throws Error with a human message on failure */
 export function validateConfig(text: string): BgConfig {
   let raw: unknown;
@@ -87,10 +122,11 @@ export function validateConfig(text: string): BgConfig {
   const source = { ...base.source };
   if (o.source && typeof o.source === "object") {
     const so = o.source as Record<string, unknown>;
-    if (so.mode === "solid" || so.mode === "image" || so.mode === "video" || so.mode === "pattern") source.mode = so.mode;
+    if (so.mode === "solid" || so.mode === "image" || so.mode === "video" || so.mode === "pattern" || so.mode === "gradient") source.mode = so.mode;
     if (typeof so.imageId === "string" || so.imageId === null) source.imageId = so.imageId as string | null;
     if (typeof so.solidColor === "string" && /^#[0-9a-fA-F]{6}$/.test(so.solidColor)) source.solidColor = so.solidColor;
     if (so.mode === "pattern" || so.pattern) source.pattern = clampPattern(so.pattern);
+    if (so.mode === "gradient" || so.gradient) source.gradient = clampGradient(so.gradient);
     if (so.transform && typeof so.transform === "object") {
       const t = so.transform as Record<string, unknown>;
       const tf: NonNullable<BgConfig["source"]["transform"]> = {};
@@ -152,6 +188,21 @@ function patternSchemaLine(): string {
   return `  pattern  { ${parts.join(", ")} }`;
 }
 
+/** the gradient-source schema line, generated from the gradient catalog (can't drift) */
+function gradientSchemaLine(): string {
+  const parts = GRADIENT_CONTROLS.map((c) => {
+    if (c.kind === "slider") return `${c.key}: ${c.min}–${c.max}`;
+    if (c.kind === "select") return `${c.key}: ${c.options.map((o) => o.value).join("|")}`;
+    if (c.kind === "switch") return `${c.key}: bool`;
+    if (c.kind === "color") return `${c.key}: #rrggbb`;
+    if (c.kind === "text") return `${c.key}: string`;
+    return `${c.key}: [{t:0..1,color:#rrggbb}, …] (interpolated in OKLCH)`;
+  });
+  // mesh corners aren't a ControlSpec — document them explicitly.
+  parts.push("mesh: [#rrggbb ×4] TL,TR,BR,BL (type:mesh only, blended in OKLab)");
+  return `  gradient  { ${parts.join(", ")} }`;
+}
+
 /** build the full prompt the user copies into Claude / any LLM */
 export function buildPrompt(config: BgConfig): string {
   return `You are configuring a layered canvas "background editor". Return ONLY a JSON object
@@ -160,7 +211,7 @@ export function buildPrompt(config: BgConfig): string {
 {
   "version": 1,
   "output": { "aspect": "3:2"|"4:3"|"16:9"|"21:9"|"1:1"|"2:3"|"9:16" | {"w":N,"h":N}, "longEdge": 200-6000 },
-  "source": { "mode": "image"|"solid"|"pattern", "imageId": string|null, "solidColor": "#rrggbb", "pattern": {…} },
+  "source": { "mode": "image"|"solid"|"pattern"|"gradient", "imageId": string|null, "solidColor": "#rrggbb", "pattern": {…}, "gradient": {…} },
   "stack": [ { "id": string, "type": EffectType, "enabled": bool, "params": {…} }, … ]
 }
 
@@ -170,6 +221,9 @@ ${schemaLines()}
 
 When "mode" is "pattern", "pattern" is a generated source (only then):
 ${patternSchemaLine()}
+
+When "mode" is "gradient", "gradient" is a continuous OKLCH color field (only then):
+${gradientSchemaLine()}
 
 RULES
 - Output the FULL config (keep ids you didn't change; invent short ids for new effects).

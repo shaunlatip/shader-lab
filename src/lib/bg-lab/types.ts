@@ -53,7 +53,13 @@ export type EffectType =
   | "characterBloom"
   // converters (Phase 5)
   | "lineArt"
-  | "kuwahara";
+  | "kuwahara"
+  // surface treatments (Editions: light + paper)
+  | "lightLeak"
+  | "gobo"
+  | "caustic"
+  | "relief"
+  | "stain";
 
 export interface Effect {
   /** stable nanoid — drives dnd + React keys, never the array index */
@@ -120,8 +126,43 @@ export interface PatternState {
   bg: string;
 }
 
+/** Continuous-field gradient source. Its own `source.mode` (not a PatternState
+ * type) because it carries N stops + geometry PatternState's fg/bg can't hold.
+ * RULE for future sources: mark/tiling pattern → a PatternType; continuous field
+ * with its own parameter shape → its own source.mode. Stops interpolate in OKLCH. */
+export type GradientType = "linear" | "radial" | "conic" | "mesh" | "warp" | "reaction";
+
+export interface GradientState {
+  type: GradientType;
+  /** degrees — linear: ramp direction; conic: start angle; warp: flow direction */
+  angle: number;
+  /** center X 0..1 (radial / conic; ignored by linear) */
+  cx: number;
+  /** center Y 0..1 (radial / conic; ignored by linear) */
+  cy: number;
+  /** radial radius as a fraction of the canvas diagonal 0..1 (radial only) */
+  radius: number;
+  /** 2..5 color stops, positioned 0..1, interpolated in OKLCH; the warp field
+   * is colored through this ramp too (all types except mesh) */
+  stops: GradientStop[];
+  /** 4 corner colors [TL, TR, BR, BL], bilinearly blended in OKLab (mesh only) */
+  mesh?: string[];
+  /** domain-warp feature scale — number of tiles across the canvas (warp only) */
+  scale?: number;
+  /** domain-warp strength — Quilez nested-fbm displacement (warp only) */
+  warp?: number;
+  /** noise seed (warp only) */
+  seed?: number;
+  /** wrap the noise domain so the tile is seamless (warp only) */
+  seamless?: boolean;
+  /** Gray-Scott feed rate (reaction only) */
+  feed?: number;
+  /** Gray-Scott kill rate (reaction only) */
+  kill?: number;
+}
+
 export interface SourceState {
-  mode: "image" | "video" | "solid" | "pattern";
+  mode: "image" | "video" | "solid" | "pattern" | "gradient";
   /** gallery id | "upload" | `pexels:<url>` | `pexels:video:<url>` | blob/data URL | null */
   imageId: string | null;
   /** #rrggbb */
@@ -130,6 +171,8 @@ export interface SourceState {
   transform?: SourceTransform;
   /** pattern generator state — only used when mode === "pattern" */
   pattern?: PatternState;
+  /** gradient generator state — only used when mode === "gradient" */
+  gradient?: GradientState;
 }
 
 export interface OutputState {

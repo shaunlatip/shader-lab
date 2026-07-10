@@ -21,6 +21,11 @@ const mk = (id: string, label: string, ext = "png"): GalleryImage => ({
 // that matters — high-contrast landmark, tonal gradient, saturated detail,
 // soft low-contrast, texture, organic scene. Uploads and Pexels are the
 // primary sources; these exist so a first render is one click away.
+// Real scanned CC0 materials — the honest answer to the richest Editions grounds
+// (Winter '26's paper/plaster is photographed, not procedural). Retint over these
+// with a Surface preset (see "Warm paper" / "Cool plaster") for the ground.
+const mkTex = (id: string, label: string): GalleryImage => ({ id, label, url: `/textures/${id}.jpg` });
+
 export const GALLERY: GalleryImage[] = [
   mk("mon-haystack", "Haystack"),
   mk("mon-sunrise", "Sunrise"),
@@ -29,6 +34,20 @@ export const GALLERY: GalleryImage[] = [
   mk("photo-dunes", "Dunes"),
   mk("atmo-charles", "Charles", "jpg"),
 ];
+
+// Material scans live in their own list — surfaced via Source → Generated →
+// Texture (not the photo gallery), since they're a distinct source register
+// (real scanned ground, not a photo subject) grouped with Gradient/Pattern.
+export const TEXTURES: GalleryImage[] = [
+  mkTex("tex-paper", "Paper"),
+  mkTex("tex-plaster", "Plaster"),
+  mkTex("tex-fabric", "Fabric"),
+  mkTex("tex-manuscript", "Manuscript"),
+];
+
+export function isTextureId(id: string | null | undefined): boolean {
+  return !!id && TEXTURES.some((t) => t.id === id);
+}
 
 // Drafts and saved configs may reference gallery images that were removed in
 // the starters cull — resolve them to the nearest surviving starter so an old
@@ -52,7 +71,7 @@ const LEGACY_IMAGE_ALIASES: Record<string, string> = {
 export function galleryUrl(id: string | null): string | null {
   if (!id) return null;
   const resolved = LEGACY_IMAGE_ALIASES[id] ?? id;
-  const g = GALLERY.find((x) => x.id === resolved);
+  const g = GALLERY.find((x) => x.id === resolved) ?? TEXTURES.find((x) => x.id === resolved);
   return g ? g.url : null;
 }
 
@@ -83,7 +102,7 @@ export function makeDefaultConfig(): BgConfig {
   };
 }
 
-export type PresetCategory = "Print" | "Text" | "Paint" | "Film" | "Grade" | "Glitch";
+export type PresetCategory = "Surface" | "Print" | "Text" | "Paint" | "Film" | "Grade" | "Glitch";
 
 export interface Preset {
   /** Stable key — names the pre-rendered thumbnail at /presets/<slug>.webp. */
@@ -144,6 +163,75 @@ export async function randomPexelsId(kind: "photo" | "video" = "photo"): Promise
 // source and output are always kept. Slugs are stable — they name the
 // pre-rendered thumbnails in /public/presets/.
 export const PRESETS: Preset[] = [
+  // ---------------------------------------------------------------- Surface & light
+  // Editions surface treatments — pair with a Gradient/Image source. These
+  // touch only the stack (source stays whatever you picked), so a gradient +
+  // "Sunlit" = the Horizons/dusk ground; a paper image + "Aged paper" = Winter '26.
+  {
+    slug: "sunlit",
+    name: "Sunlit",
+    category: "Surface",
+    build: () => [
+      withParams("gobo", { shape: "frond", softness: 8, strength: 0.32, angle: 14, lightAngle: 315 }),
+      withParams("lightLeak", { warmth: 0.55, intensity: 0.42, angle: 315 }),
+      withParams("grain", { amount: 0.06 }),
+    ],
+  },
+  {
+    slug: "aged-paper",
+    name: "Aged paper",
+    category: "Surface",
+    build: () => [
+      withParams("relief", { depth: 0.55, scale: 22, lightAzimuth: 100, lightElevation: 17 }),
+      withParams("stain", { age: 0.5 }),
+      withParams("grain", { amount: 0.05 }),
+    ],
+  },
+  {
+    slug: "poolside",
+    name: "Poolside",
+    category: "Surface",
+    build: () => [
+      withParams("caustic", { intensity: 0.4, scale: 6, warmth: 0.25 }),
+      withParams("grain", { amount: 0.05 }),
+    ],
+  },
+  {
+    slug: "blinds",
+    name: "Venetian light",
+    category: "Surface",
+    build: () => [
+      withParams("gobo", { shape: "blinds", softness: 5, strength: 0.28, angle: -8, lightAngle: 300 }),
+      withParams("lightLeak", { warmth: 0.7, intensity: 0.34, angle: 300 }),
+      withParams("grain", { amount: 0.05 }),
+    ],
+  },
+  // Retint moves for the material scans (pick a texture in the gallery first):
+  // desaturate slightly, warm/cool tint, keep the tooth, light vignette.
+  {
+    slug: "warm-paper",
+    name: "Warm paper",
+    category: "Surface",
+    build: () => [
+      withParams("adjust", { saturation: 0.7, contrast: 1.03 }),
+      withParams("tint", { color: "#c8b48a", opacity: 0.2, blend: "multiply" }),
+      withParams("stain", { age: 0.35 }),
+      withParams("vignette", { amount: 0.18 }),
+      withParams("grain", { amount: 0.04 }),
+    ],
+  },
+  {
+    slug: "cool-plaster",
+    name: "Cool plaster",
+    category: "Surface",
+    build: () => [
+      withParams("adjust", { saturation: 0.55 }),
+      withParams("tint", { color: "#c3cbd2", opacity: 0.16, blend: "soft-light" }),
+      withParams("vignette", { amount: 0.16 }),
+      withParams("grain", { amount: 0.04 }),
+    ],
+  },
+
   // ---------------------------------------------------------------- Paint
   // maximeheckel-adjacent painterly/structural effects lead the gallery:
   // Kuwahara first, then line art.
@@ -569,4 +657,4 @@ export const PRESETS: Preset[] = [
 export const CURATED_PRESETS = PRESETS.filter((p) => p.curated);
 // Priority order per the maximeheckel-style effects: Paint (Kuwahara, line
 // art) leads, then Print (dither/dots/halftone), then Glitch (mosaic).
-export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Paint", "Print", "Glitch", "Text", "Film", "Grade"];
+export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Surface", "Paint", "Print", "Glitch", "Text", "Film", "Grade"];

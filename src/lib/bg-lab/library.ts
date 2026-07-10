@@ -4,7 +4,8 @@ import { nanoid } from "nanoid";
 import type { BgConfig, Effect, SourceState } from "./types";
 import { EFFECT_CATALOG } from "./catalog";
 import { PATTERN_TYPE_LABEL } from "./patternCatalog";
-import { GALLERY, PRESETS, type PresetCategory } from "./presets";
+import { GRADIENT_TYPE_LABEL } from "./gradientCatalog";
+import { GALLERY, TEXTURES, PRESETS, type PresetCategory } from "./presets";
 
 /** A named, reusable effect stack. `builtin` ones ship with the app. */
 export interface SavedEffect {
@@ -60,10 +61,11 @@ export function loadDrafts(): Draft[] {
 /** Human label for a source, for auto-naming. */
 function sourceLabel(s: SourceState): string {
   if (s.mode === "pattern") return "Pattern · " + (s.pattern ? (PATTERN_TYPE_LABEL[s.pattern.type] ?? "") : "");
+  if (s.mode === "gradient") return "Gradient · " + (s.gradient ? GRADIENT_TYPE_LABEL[s.gradient.type] : "");
   if (s.mode === "solid") return s.solidColor;
   const id = s.imageId;
   if (!id) return s.mode === "video" ? "Video" : "";
-  const g = GALLERY.find((x) => x.id === id);
+  const g = GALLERY.find((x) => x.id === id) ?? TEXTURES.find((x) => x.id === id);
   if (g) return g.label;
   if (id.startsWith("pexels:video:")) return "Pexels clip";
   if (id.startsWith("pexels:")) return "Pexels";

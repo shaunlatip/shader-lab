@@ -220,6 +220,13 @@ export function PresetGallery() {
                           src={thumb(p.slug)}
                           alt=""
                           loading="lazy"
+                          // Not every preset has a pre-rendered thumbnail yet
+                          // (e.g. the Surface treatments) — hide a 404 rather
+                          // than showing a broken-image glyph; the labeled row
+                          // still reads fine.
+                          onError={(e) => {
+                            e.currentTarget.style.visibility = "hidden";
+                          }}
                           className="h-8 w-12 shrink-0 rounded-[4px] border border-border-default object-cover"
                         />
                         <span className="truncate text-[13px]">{p.name}</span>

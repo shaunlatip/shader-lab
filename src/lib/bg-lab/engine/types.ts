@@ -2,13 +2,14 @@
 // a concrete engine, so a WebGL engine can drop in later without touching anything
 // above this line.
 
-import type { BgConfig, Dims, PatternState } from "../types";
+import type { BgConfig, Dims, GradientState, PatternState } from "../types";
 
 export type EngineSource =
   | { kind: "image"; image: CanvasImageSource & { width?: number; height?: number } }
   | { kind: "video"; video: HTMLVideoElement }
   | { kind: "solid"; color: string }
   | { kind: "pattern"; pattern: PatternState }
+  | { kind: "gradient"; gradient: GradientState }
   | null;
 
 export interface RenderEngine {

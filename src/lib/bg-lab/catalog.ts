@@ -64,16 +64,17 @@ export type ControlSpec = ControlCommon &
   );
 
 /** add-effect menu groups: converters/styles vs the tone/color/post post-processors */
-export type CategoryId = "converter" | "tone" | "color" | "post";
+export type CategoryId = "converter" | "tone" | "color" | "surface" | "post";
 
 export const CATEGORY_LABEL: Record<CategoryId, string> = {
   converter: "Converters",
   tone: "Tone",
   color: "Color",
+  surface: "Surface & light",
   post: "Post",
 };
 
-export const CATEGORY_ORDER: CategoryId[] = ["converter", "tone", "color", "post"];
+export const CATEGORY_ORDER: CategoryId[] = ["converter", "tone", "color", "surface", "post"];
 
 export interface EffectMeta {
   type: EffectType;
@@ -417,6 +418,7 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "size", label: "Size", min: 1, max: 6, step: 0.5, default: 1.5, unit: true },
       { kind: "switch", key: "mono", label: "Monochrome", default: true },
       { kind: "switch", key: "animate", label: "Animate", default: true },
+      { kind: "slider", key: "seed", label: "Seed", min: 1, max: 999, step: 1, default: 1 },
       { kind: "select", key: "blend", label: "Blend", options: BLENDS, default: "soft-light" },
     ],
   },
@@ -872,6 +874,81 @@ export const EFFECT_CATALOG: Record<EffectType, EffectMeta> = {
       { kind: "slider", key: "radius", label: "Radius", min: 0, max: 40, step: 0.5, default: 6, unit: true },
     ],
   },
+  // ---- surface treatments (Editions light + paper language) ----
+  lightLeak: {
+    type: "lightLeak",
+    category: "surface",
+    label: "Light leak",
+    blurb: "Warm wash + feathered beam + chromatic fringe",
+    controls: [
+      { kind: "slider", key: "warmth", label: "Warmth", min: 0, max: 1, step: 0.01, default: 0.6 },
+      { kind: "slider", key: "intensity", label: "Intensity", min: 0, max: 1, step: 0.01, default: 0.4 },
+      { kind: "slider", key: "angle", label: "Angle", min: 0, max: 360, step: 1, default: 315 },
+    ],
+  },
+  gobo: {
+    type: "gobo",
+    category: "surface",
+    label: "Gobo / shadow play",
+    blurb: "Silhouette shadow with a soft distance-scaled penumbra",
+    heavy: true,
+    controls: [
+      {
+        kind: "select",
+        key: "shape",
+        label: "Shape",
+        options: [
+          { value: "frond", label: "Palm frond" },
+          { value: "blinds", label: "Venetian blinds" },
+          { value: "window", label: "Window frame" },
+          { value: "foliage", label: "Foliage" },
+        ],
+        default: "frond",
+      },
+      { kind: "slider", key: "softness", label: "Softness", min: 2, max: 16, step: 0.5, default: 7, unit: true },
+      { kind: "slider", key: "strength", label: "Strength", min: 0, max: 0.8, step: 0.01, default: 0.32 },
+      { kind: "slider", key: "angle", label: "Rotation", min: -60, max: 60, step: 1, default: 14 },
+      { kind: "slider", key: "lightAngle", label: "Light angle", min: 0, max: 360, step: 1, default: 315 },
+    ],
+  },
+  caustic: {
+    type: "caustic",
+    category: "surface",
+    label: "Caustics",
+    blurb: "fbm-warped bright bands (pool light)",
+    heavy: true,
+    controls: [
+      { kind: "slider", key: "intensity", label: "Intensity", min: 0, max: 1, step: 0.01, default: 0.35 },
+      { kind: "slider", key: "scale", label: "Scale", min: 1, max: 20, step: 0.5, default: 5 },
+      { kind: "slider", key: "warmth", label: "Warmth", min: 0, max: 1, step: 0.01, default: 0.3 },
+      { kind: "slider", key: "seed", label: "Seed", min: 1, max: 999, step: 1, default: 1 },
+    ],
+  },
+  relief: {
+    type: "relief",
+    category: "surface",
+    label: "Paper relief",
+    blurb: "Procedural paper tooth (noise → normal → light)",
+    heavy: true,
+    controls: [
+      { kind: "slider", key: "depth", label: "Depth", min: 0, max: 1, step: 0.01, default: 0.5 },
+      { kind: "slider", key: "scale", label: "Scale", min: 4, max: 60, step: 1, default: 22 },
+      { kind: "slider", key: "lightAzimuth", label: "Light azimuth", min: 0, max: 360, step: 1, default: 100 },
+      { kind: "slider", key: "lightElevation", label: "Light elevation", min: 5, max: 80, step: 1, default: 17 },
+      { kind: "slider", key: "seed", label: "Seed", min: 1, max: 999, step: 1, default: 7 },
+    ],
+  },
+  stain: {
+    type: "stain",
+    category: "surface",
+    label: "Stain / foxing",
+    blurb: "Aged low-frequency blotches (multiply)",
+    controls: [
+      { kind: "slider", key: "age", label: "Age", min: 0, max: 1, step: 0.01, default: 0.4 },
+      { kind: "color", key: "color", label: "Color", default: "#86643c" },
+      { kind: "slider", key: "seed", label: "Seed", min: 1, max: 999, step: 1, default: 3 },
+    ],
+  },
 };
 
 // Add-effect menu order (grouped loosely: tone → structure → color → stylize → post).
@@ -907,6 +984,12 @@ export const EFFECT_ORDER: EffectType[] = [
   // color
   "gradientMap",
   "tint",
+  // surface & light
+  "lightLeak",
+  "gobo",
+  "caustic",
+  "relief",
+  "stain",
   // post
   "chromatic",
   "displace",
