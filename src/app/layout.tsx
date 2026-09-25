@@ -1,37 +1,47 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
-import { GeistPixelSquare } from "geist/font/pixel";
 import localFont from "next/font/local";
 import Providers from "./providers";
 import "./globals.css";
 
-// Fonts the lab UI uses: font-lab (General Sans, UI/body), font-nagel
-// (Cabinet Grotesk, display/titles), font-mono (Geist Mono, values), font-pixel
-// (Geist Pixel Square, the "shaderlab" wordmark only). The Fontshare variable
-// files are self-hosted in src/fonts (FFL license there); Geist Pixel ships
-// with the `geist` npm package (SIL license). The @theme tokens in globals.css
+// Fonts the lab UI uses: font-lab / font-nagel (Hibana, UI/body and titles),
+// font-mono (Geist Mono, values), font-logo (Fontlab Font, the "shaderlab"
+// wordmark only). Hibana and Fontlab Font are single-weight OFL faces
+// self-hosted in src/fonts (licenses there). The @theme tokens in globals.css
 // read these CSS variables. The engine's glyph rendering uses ui-monospace
 // and is intentionally decoupled from UI fonts — export output must not
 // change when the chrome typeface does.
-const generalSans = localFont({
-  src: "../fonts/GeneralSans-Variable.woff2",
-  variable: "--font-general-sans",
-  weight: "200 700",
+// Hibana's one cut is 45 SubMedium (usWeightClass 500); every requested
+// weight resolves to it.
+const hibana = localFont({
+  src: "../fonts/Hibana-45SubMedium.woff2",
+  variable: "--font-hibana",
+  weight: "500",
   display: "swap",
 });
-const cabinetGrotesk = localFont({
-  src: "../fonts/CabinetGrotesk-Variable.woff2",
-  variable: "--font-cabinet-grotesk",
-  weight: "100 800",
+const fontlab = localFont({
+  src: "../fonts/FontlabFont-Regular.woff2",
+  variable: "--font-fontlab",
+  weight: "400",
   display: "swap",
 });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
-// The header wordmark's `font-pixel` face — Vercel's Geist Pixel (Square cut).
 
+// Separate favicons per color scheme: dark ink for light browser chrome, light
+// ink for dark. These follow the OS/browser scheme, not the in-app theme
+// toggle — the tab strip belongs to the browser. favicon.ico is the fallback
+// for browsers without SVG favicon support.
 export const metadata: Metadata = {
   title: "shaderlab — image effects studio",
   description:
     "A studio for layered image effects — pixelate, dither, halftone, gradient maps, grain and more. Stack, reorder, and export.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "32x32" },
+      { url: "/icon-light.svg", type: "image/svg+xml", media: "(prefers-color-scheme: light)" },
+      { url: "/icon-dark.svg", type: "image/svg+xml", media: "(prefers-color-scheme: dark)" },
+    ],
+  },
 };
 
 export default function RootLayout({
@@ -59,7 +69,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${generalSans.variable} ${cabinetGrotesk.variable} ${geistMono.variable} ${GeistPixelSquare.variable} antialiased`}
+        className={`${hibana.variable} ${fontlab.variable} ${geistMono.variable} antialiased`}
       >
         <Providers>{children}</Providers>
       </body>

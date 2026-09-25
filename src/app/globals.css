@@ -314,9 +314,9 @@ html:has(#intro-root[data-phase="reveal"]) {
      reads as prose. The test: if copying the text verbatim into a terminal would mean the
      same thing, mono works. If not, sans. See CLAUDE.md § Mono accent. */
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  /* Geist Pixel (Square cut) — the app wordmark only ("shaderlab" in the
-     header). Drives the `font-pixel` utility. */
-  --font-pixel: var(--font-geist-pixel-square), var(--font-geist-mono), ui-monospace, monospace;
+  /* Fontlab Font — the app wordmark only ("shaderlab" in the header). Drives
+     the `font-logo` utility. */
+  --font-logo: var(--font-fontlab), system-ui, sans-serif;
 
   /* --- Font weights ---
      Switzer is a variable font, so any weight in 100–900 is a real cut.
@@ -1171,14 +1171,18 @@ html:has(#intro-root[data-phase="reveal"]) {
    and e.g. `--font-sans: var(--font-switzer), ...` has no fallback — so it's
    "guaranteed-invalid" in production and body text drops to the UA serif.
    Redefine the tokens on <body>, where next/font's variables are actually set,
-   against the fonts layout.tsx loads: General Sans (UI/body), Cabinet Grotesk
-   (display/titles), Geist Mono (values). */
+   against the fonts layout.tsx loads: Hibana (UI/body and titles), Geist Mono
+   (values), Fontlab Font (wordmark).
+   Hibana (45 SubMedium, 500) and Fontlab Font (400) each ship one weight. Weight synthesis
+   is off so font-semibold/bold never render as a smeared faux bold; hierarchy
+   comes from size and color. Geist Mono is variable and keeps real weights. */
 body {
-  --font-sans: var(--font-general-sans), system-ui, sans-serif;
-  --font-lab: var(--font-general-sans), system-ui, sans-serif;
-  --font-heading: var(--font-cabinet-grotesk), system-ui, sans-serif;
-  --font-nagel: var(--font-cabinet-grotesk), system-ui, sans-serif;
+  --font-sans: var(--font-hibana), system-ui, sans-serif;
+  --font-lab: var(--font-hibana), system-ui, sans-serif;
+  --font-heading: var(--font-hibana), system-ui, sans-serif;
+  --font-nagel: var(--font-hibana), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   --font-serif: Georgia, "Times New Roman", serif;
-  --font-pixel: var(--font-geist-pixel-square), var(--font-geist-mono), ui-monospace, monospace;
+  --font-logo: var(--font-fontlab), system-ui, sans-serif;
+  font-synthesis-weight: none;
 }

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Shuffle } from "lucide-react";
 import type { ControlSpec } from "@/lib/bg-lab/catalog";
 import type { PatternState, PatternType } from "@/lib/bg-lab/types";
-import { DEFAULT_PATTERN } from "@/lib/bg-lab/patternCatalog";
+import { DEFAULT_PATTERN, PATTERN_APPLIES } from "@/lib/bg-lab/patternCatalog";
 import { cn } from "@/lib/utils";
 import { useBgLab } from "./BgLabProvider";
 import { ControlRow } from "./controls/ControlRow";
@@ -31,40 +31,6 @@ const PATTERN_TYPE_OPTIONS: { value: PatternType; label: string }[] = [
   { value: "sky", label: "Sky" },
   { value: "caustics", label: "Caustics" },
 ];
-
-// Controls only render for the types they affect — Angle on a dot grid or
-// Stagger on rings were dead knobs that made the panel read untrustworthy.
-// Generative fields repurpose knobs (see each draw's doc comment); they're
-// listed here under whichever knob they actually read. Cutting mat spins as
-// one rigid design on Angle (grid + registration marks together) but ignores
-// jitter/stagger — only cell/weight/angle/ink apply.
-// Stroke/mark patterns (Matte's model): px Thickness + Opacity. These are the
-// families whose marks are strokes or dots, so an absolute px width reads 1:1
-// with Matte's Thickness slider.
-const STROKE_TYPES: PatternType[] = [
-  "dotGrid", "lineGrid", "graph", "plusGrid", "xGrid",
-  "stripes", "waves", "rings", "iso", "hex", "truchet", "cuttingMat", "moire",
-];
-
-const APPLIES: Partial<Record<string, PatternType[]>> = {
-  // Angle now spins every pattern except the two it can't move: rings (radially
-  // symmetric) and voronoi (no domain rotation). The tiling grids rotate via
-  // the over-scan wrapper in patterns.ts; the rest consume angle themselves.
-  angle: [
-    "dotGrid", "lineGrid", "graph", "checker", "plusGrid", "xGrid", "hex", "truchet", "iso",
-    "stripes", "waves", "halftoneGradient", "moire", "fbm", "clouds", "sky", "caustics", "cuttingMat",
-  ],
-  // Thickness (px) drives the stroke/mark families; the fill/field patterns
-  // (halftone ramp, generative softness) keep Weight instead. Checker is a
-  // pure two-tone fill — neither applies.
-  thickness: STROKE_TYPES,
-  weight: ["halftoneGradient", "voronoi", "fbm", "clouds", "sky", "caustics"],
-  // Opacity fades the marks over the background — every stroke/fill pattern,
-  // but not the opaque generative fields (they gate it out).
-  opacity: [...STROKE_TYPES, "checker", "halftoneGradient"],
-  jitter: ["dotGrid", "iso", "plusGrid", "xGrid", "moire", "fbm", "clouds", "sky", "caustics"],
-  stagger: ["dotGrid", "halftoneGradient", "voronoi", "caustics"],
-};
 
 const GEOMETRY: ControlSpec[] = [
   { kind: "slider", key: "cell", label: "Spacing", min: 4, max: 200, step: 1, default: DEFAULT_PATTERN.cell, unit: true },
@@ -169,7 +135,7 @@ export function PatternPanel() {
   };
   const presets = PATTERN_PRESETS[pattern.type];
   const geometry = GEOMETRY.filter((s) => {
-    const gate = APPLIES[s.key];
+    const gate = PATTERN_APPLIES[s.key];
     return !gate || gate.includes(pattern.type);
   });
   // Angle gets its own dial column (Matte-style) instead of sitting in the
@@ -226,7 +192,7 @@ export function PatternPanel() {
         )}
       </div>
       <div className="flex flex-col gap-2.5 border-t border-border-default pt-2.5">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Geometry</span>
+        <span className="text-[11px] font-medium text-text-secondary">Geometry</span>
         <div className="flex gap-3">
           <div className="flex flex-1 flex-col gap-2.5">{linearGeometry.map(row)}</div>
           {showDial && (
@@ -239,7 +205,7 @@ export function PatternPanel() {
         </div>
       </div>
       <div className="flex flex-col gap-2.5 border-t border-border-default pt-2.5">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Ink</span>
+        <span className="text-[11px] font-medium text-text-secondary">Ink</span>
         {INK.map(row)}
       </div>
     </section>

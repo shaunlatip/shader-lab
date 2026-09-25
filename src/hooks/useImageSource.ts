@@ -75,25 +75,40 @@ function loadVideo(url: string): Promise<HTMLVideoElement> {
   });
 }
 
+/** Identity of the source *asset*: which image/video, or which generator
+ * mode. Parameter tweaks inside a mode (pattern sliders, gradient stops,
+ * solid color) keep the key — those resolve synchronously and never need
+ * the Stage to wait. */
+export function sourceKey(source: SourceState): string {
+  return source.mode === "image" || source.mode === "video" ? `${source.mode}:${source.imageId ?? ""}` : source.mode;
+}
+
 export interface ResolvedSource {
   engineSource: EngineSource;
   loading: boolean;
   error: string | null;
+  /** sourceKey() of the source `engineSource` belongs to. While a new
+   * image/video loads, engineSource (and this key) still describe the
+   * previous one — the Stage compares keys to keep drawing the previous
+   * look until the new asset is ready, so source and effects swap together. */
+  key: string | null;
 }
 
 export function useImageSource(source: SourceState): ResolvedSource {
-  const [state, setState] = useState<ResolvedSource>({ engineSource: null, loading: false, error: null });
+  const [state, setState] = useState<ResolvedSource>({ engineSource: null, loading: false, error: null, key: null });
   const reqRef = useRef(0);
 
   useEffect(() => {
     // Bump first so any in-flight image/video load is invalidated even when we
     // take an early (solid / no-url / pattern) return below.
     const req = ++reqRef.current;
+    const key = sourceKey(source);
     if (source.mode === "pattern") {
       setState({
         engineSource: { kind: "pattern", pattern: source.pattern ?? DEFAULT_PATTERN },
         loading: false,
         error: null,
+        key,
       });
       return;
     }
@@ -102,16 +117,17 @@ export function useImageSource(source: SourceState): ResolvedSource {
         engineSource: { kind: "gradient", gradient: source.gradient ?? DEFAULT_GRADIENT },
         loading: false,
         error: null,
+        key,
       });
       return;
     }
     if (source.mode === "solid") {
-      setState({ engineSource: { kind: "solid", color: source.solidColor }, loading: false, error: null });
+      setState({ engineSource: { kind: "solid", color: source.solidColor }, loading: false, error: null, key });
       return;
     }
     const url = resolveUrl(source);
     if (!url) {
-      setState({ engineSource: null, loading: false, error: null });
+      setState({ engineSource: null, loading: false, error: null, key });
       return;
     }
     setState((s) => ({ ...s, loading: true, error: null }));
@@ -120,11 +136,11 @@ export function useImageSource(source: SourceState): ResolvedSource {
       loadVideo(url)
         .then((v) => {
           if (reqRef.current !== req) return;
-          setState({ engineSource: { kind: "video", video: v }, loading: false, error: null });
+          setState({ engineSource: { kind: "video", video: v }, loading: false, error: null, key });
         })
         .catch(() => {
           if (reqRef.current !== req) return;
-          setState({ engineSource: null, loading: false, error: "Couldn't load that video." });
+          setState({ engineSource: null, loading: false, error: "Couldn't load that video.", key });
         });
       return;
     }
@@ -132,11 +148,11 @@ export function useImageSource(source: SourceState): ResolvedSource {
     loadImage(url)
       .then((im) => {
         if (reqRef.current !== req) return;
-        setState({ engineSource: { kind: "image", image: im }, loading: false, error: null });
+        setState({ engineSource: { kind: "image", image: im }, loading: false, error: null, key });
       })
       .catch(() => {
         if (reqRef.current !== req) return;
-        setState({ engineSource: null, loading: false, error: "Couldn't load that image." });
+        setState({ engineSource: null, loading: false, error: "Couldn't load that image.", key });
       });
   }, [source.mode, source.imageId, source.solidColor, source.pattern, source.gradient]);
 

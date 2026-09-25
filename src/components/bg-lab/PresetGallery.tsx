@@ -141,7 +141,7 @@ export function PresetGallery() {
       <div className="flex flex-col gap-4">
         {byCategory.map(({ cat, presets }) => (
           <div key={cat} className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">{cat}</span>
+            <span className="text-[11px] font-medium text-text-secondary">{cat}</span>
             <div className="grid grid-cols-2 gap-2">
               {presets.map((p) => (
                 <PresetCard key={p.slug} preset={p} onApply={() => apply(p)} />

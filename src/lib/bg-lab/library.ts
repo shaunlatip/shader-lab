@@ -5,7 +5,7 @@ import type { BgConfig, Effect, SourceState } from "./types";
 import { EFFECT_CATALOG } from "./catalog";
 import { PATTERN_TYPE_LABEL } from "./patternCatalog";
 import { GRADIENT_TYPE_LABEL } from "./gradientCatalog";
-import { GALLERY, TEXTURES, PRESETS, type PresetCategory } from "./presets";
+import { GALLERY, EXAMPLES, TEXTURES, PRESETS, exampleSourceId, type PresetCategory } from "./presets";
 
 /** A named, reusable effect stack. `builtin` ones ship with the app. */
 export interface SavedEffect {
@@ -67,6 +67,8 @@ function sourceLabel(s: SourceState): string {
   if (!id) return s.mode === "video" ? "Video" : "";
   const g = GALLERY.find((x) => x.id === id) ?? TEXTURES.find((x) => x.id === id);
   if (g) return g.label;
+  const example = EXAMPLES.find((r) => exampleSourceId(r) === id);
+  if (example) return example.subject;
   if (id.startsWith("pexels:video:")) return "Pexels clip";
   if (id.startsWith("pexels:")) return "Pexels";
   if (id.startsWith("blob:") || id.startsWith("data:")) return s.mode === "video" ? "Upload clip" : "Upload";

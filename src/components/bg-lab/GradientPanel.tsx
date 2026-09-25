@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { Shuffle } from "lucide-react";
 import type { ControlSpec } from "@/lib/bg-lab/catalog";
-import type { GradientState, GradientType } from "@/lib/bg-lab/types";
-import { DEFAULT_GRADIENT, DEFAULT_MESH, GRADIENT_CONTROLS } from "@/lib/bg-lab/gradientCatalog";
+import type { GradientState } from "@/lib/bg-lab/types";
+import { DEFAULT_GRADIENT, DEFAULT_MESH, GRADIENT_APPLIES, GRADIENT_CONTROLS } from "@/lib/bg-lab/gradientCatalog";
 import { cn } from "@/lib/utils";
 import { useBgLab } from "./BgLabProvider";
 import { ControlRow } from "./controls/ControlRow";
@@ -11,22 +11,6 @@ import { RotationDial } from "./controls/RotationDial";
 import { IconTip, SectionHeader } from "./panel";
 
 const MESH_CORNER_LABEL = ["Top left", "Top right", "Bottom right", "Bottom left"];
-
-// Which geometry knobs a gradient type actually reads — hiding dead knobs (a
-// radius slider on a linear ramp) keeps the panel trustworthy, same rule as
-// PatternPanel's APPLIES.
-const APPLIES: Partial<Record<string, GradientType[]>> = {
-  angle: ["linear", "conic", "warp"],
-  cx: ["radial", "conic"],
-  cy: ["radial", "conic"],
-  radius: ["radial"],
-  scale: ["warp"],
-  warp: ["warp"],
-  seed: ["warp", "reaction"],
-  seamless: ["warp"],
-  feed: ["reaction"],
-  kill: ["reaction"],
-};
 
 // Curated starting points — each is a known-good Editions-adjacent ground. The
 // ramps are two/three-stop OKLCH so midpoints stay luminous. Chips replace the
@@ -118,7 +102,7 @@ export function GradientPanel() {
   const stopsSpec = GRADIENT_CONTROLS.find((s) => s.key === "stops")!;
   const geometry = GRADIENT_CONTROLS.filter((s) => {
     if (s.key === "type" || s.key === "stops") return false;
-    const gate = APPLIES[s.key];
+    const gate = GRADIENT_APPLIES[s.key];
     return !gate || gate.includes(gradient.type);
   });
   const showDial = geometry.some((s) => s.key === "angle");
@@ -171,7 +155,7 @@ export function GradientPanel() {
       </div>
       {gradient.type === "mesh" ? (
         <div className="flex flex-col gap-2.5 border-t border-border-default pt-2.5">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Corners · OKLab</span>
+          <span className="text-[11px] font-medium text-text-secondary">Corners · OKLab</span>
           <div className="grid grid-cols-2 gap-2">
             {MESH_CORNER_LABEL.map((label, i) => (
               <div key={label} className="flex items-center gap-2">
@@ -189,7 +173,7 @@ export function GradientPanel() {
         <>
           {geometry.length > 0 && (
             <div className="flex flex-col gap-2.5 border-t border-border-default pt-2.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Geometry</span>
+              <span className="text-[11px] font-medium text-text-secondary">Geometry</span>
               <div className="flex gap-3">
                 <div className="flex flex-1 flex-col gap-2.5">{linearGeometry.map(row)}</div>
                 {showDial && (
@@ -203,7 +187,7 @@ export function GradientPanel() {
             </div>
           )}
           <div className="flex flex-col gap-2.5 border-t border-border-default pt-2.5">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Ramp · OKLCH</span>
+            <span className="text-[11px] font-medium text-text-secondary">Ramp · OKLCH</span>
             {row(stopsSpec)}
           </div>
         </>

@@ -1,45 +1,37 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CreditCard, Grid3x3, Maximize, Minus, Plus, RotateCcw } from "lucide-react";
+import { ImageDown, Maximize, Minus, PanelBottomClose, PanelBottomOpen, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { createEngine, preferredEngineId, type RenderEngine } from "@/lib/bg-lab/engine";
 import { aspectRatio, previewDims } from "@/lib/bg-lab/resolution";
 import { IDENTITY, clampZoom, zoomToward, type View } from "@/lib/bg-lab/zoom";
-import type { Dims } from "@/lib/bg-lab/types";
+import type { BgConfig, Dims } from "@/lib/bg-lab/types";
+import { sourceKey } from "@/hooks/useImageSource";
 import { useBgLab } from "./BgLabProvider";
 import { useEngineSource } from "./SourceProvider";
-import { IconTip } from "./panel";
+import { IconTip, labButton } from "./panel";
 import { VideoTransport } from "./VideoTransport";
+import { ExamplesRail } from "./ExamplesRail";
+import { useOnboarding } from "./OnboardingProvider";
+import { useSourceDrop } from "./useSourceDrop";
 
 const PAD = 56;
 
-// Preview-only overlay: a placeholder UI card centered on the artwork plus a
-// dashed safe-zone guide (keep the texture calm here so focal UI wins). Never
-// rendered into the canvas / export — a DOM overlay tracking the canvas rect.
-function CardOverlay({ mode }: { mode: "light" | "dark" }) {
-  const light = mode === "light";
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[2px]">
-      {/* safe zone — keep the center calm for focal UI */}
-      <div className="absolute inset-[14%] rounded-[6px] border border-dashed border-white/40 mix-blend-overlay" />
-      {/* placeholder card */}
-      <div
-        className={cn(
-          "absolute left-1/2 top-1/2 flex h-[28%] w-[46%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-[10px] shadow-[0_12px_40px_rgba(0,0,0,0.28)]",
-          light ? "bg-white text-neutral-900" : "bg-neutral-900 text-white ring-1 ring-white/10",
-        )}
-      >
-        <span className="text-[clamp(11px,2.2vw,18px)] font-semibold tracking-tight">Your UI here</span>
-      </div>
-    </div>
-  );
-}
+// Narrow stage (phone, or a tablet with a panel docked): tighter margins and
+// a trimmed toolbar/transport.
+const COMPACT_BELOW = 560;
+const PAD_COMPACT = 24;
+// Space held clear under the artwork so the floating toolbar (and the video
+// transport above it) never sit on top of the canvas. Measured from the
+// stage bottom to each overlay's top edge, minus the half-PAD the fit already
+// leaves, plus a small gap.
+const RESERVE = { still: 24, video: 72 };
 
-function cssFit(boxW: number, boxH: number, ratio: number) {
-  let w = boxW - PAD;
+function cssFit(boxW: number, boxH: number, ratio: number, pad = PAD) {
+  let w = boxW - pad;
   let h = w / ratio;
-  if (h > boxH - PAD) {
-    h = boxH - PAD;
+  if (h > boxH - pad) {
+    h = boxH - pad;
     w = h * ratio;
   }
   // Integer CSS size: fractional boxes antialias the bitmap edge and let the
@@ -49,7 +41,18 @@ function cssFit(boxW: number, boxH: number, ratio: number) {
 
 export function Stage() {
   const { config } = useBgLab();
-  const { engineSource, loading } = useEngineSource();
+  const { engineSource, loading, error, key: resolvedKey } = useEngineSource();
+  // Does the loaded engineSource belong to the source the config asks for?
+  // False only while a new image/video loads (see the render loop).
+  const sourceReady = resolvedKey === sourceKey(config.source);
+  const heldConfigRef = useRef<BgConfig | null>(null);
+  const { examplesOpen, setExamplesOpen } = useOnboarding();
+  const { dragOver, dropHandlers } = useSourceDrop();
+  // Nothing to render: no image/video picked, or it failed to load. Keyed off
+  // the config (not a null engineSource), which is also null for the frame
+  // before a load starts.
+  const media = config.source.mode === "image" || config.source.mode === "video";
+  const empty = !loading && (!!error || (media && !config.source.imageId));
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Lazily (re)create the engine. We must NOT eagerly build it in render
@@ -75,24 +78,30 @@ export function Stage() {
   const [view, setView] = useState<View>(IDENTITY);
   // "Original" shows the untouched source (renders with an empty stack).
   const [showOriginal, setShowOriginal] = useState(false);
-  // Card-composite preview: drop a placeholder UI panel + safe-zone guide over
-  // the canvas so you can judge whether a light/dark card reads against the
-  // background WHILE editing. Pure Stage-local state — never touches BgConfig,
-  // so it can't leak into the config-as-JSON moat or the export.
-  const [cardMode, setCardMode] = useState<"off" | "light" | "dark">("off");
-  const nextCard = { off: "light", light: "dark", dark: "off" } as const;
-  // Tile preview: repeat the current render 3×3 so seams are obvious — the check
-  // that turns one render into a reusable seamless texture asset.
-  const [tile, setTile] = useState(false);
-  const [tileSrc, setTileSrc] = useState<string | null>(null);
 
   const ratio = aspectRatio(config.output.aspect);
-  const fit = cssFit(box.w, box.h, ratio);
+  const compact = box.w > 0 && box.w < COMPACT_BELOW;
+  const pad = compact ? PAD_COMPACT : PAD;
+  const isVideoSource = engineSource?.kind === "video";
+  const reserve = isVideoSource ? RESERVE.video : RESERVE.still;
+  const fit = cssFit(box.w, box.h, ratio, pad);
   // Checker only when the render can actually be transparent — as a resting
   // background it bleeds a light fringe around opaque artwork edges.
   const canBeTransparent = config.stack.some(
     (e) => e.enabled && e.params?.background === "transparent",
   );
+
+  // A video source starts playing as soon as it's picked (muted + looped at
+  // load), so an example reads as motion right away — except under reduced
+  // motion, where the transport's Play stays the user's call. Switching away
+  // pauses the old clip: loaded videos stay cached, and a cached clip left
+  // playing keeps decoding in the background.
+  useEffect(() => {
+    if (engineSource?.kind !== "video") return;
+    const video = engineSource.video;
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) video.play().catch(() => {});
+    return () => video.pause();
+  }, [engineSource]);
 
   // release the GL context (and CPU resources) when the lab unmounts —
   // browsers cap live WebGL contexts, so leaking one per mount eventually kills
@@ -125,8 +134,8 @@ export function Stage() {
   useEffect(() => {
     if (box.w < 2 || box.h < 2) return;
     const dpr = Math.min(2, typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
-    setDims(previewDims(config.output.aspect, { w: box.w - PAD, h: box.h - PAD }, dpr));
-  }, [box.w, box.h, config.output.aspect]);
+    setDims(previewDims(config.output.aspect, { w: box.w - pad, h: box.h - pad }, dpr));
+  }, [box.w, box.h, config.output.aspect, pad]);
 
   // render loop. Static sources render once per change; video sources and
   // animated effects (glitch/film-dust/grain with `animate`) run a continuous
@@ -134,12 +143,18 @@ export function Stage() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || dims.W < 2) return;
-    const cfg = showOriginal ? { ...config, stack: [] } : config;
+    // Source and effects swap together: while a new image/video is still
+    // loading, engineSource is the previous one, so keep drawing the config
+    // that belongs to it. Otherwise an example switch (source + stack at once)
+    // would flash the new effects over the old clip before the new clip lands.
+    if (sourceReady) heldConfigRef.current = config;
+    const base = sourceReady ? config : (heldConfigRef.current ?? config);
+    const cfg = showOriginal ? { ...base, stack: [] } : base;
     const isVideo = engineSource?.kind === "video";
     // A video must keep looping even in "Original" view (it just runs with an
     // empty stack); animated effects only loop when we're showing the edit.
     const animated =
-      isVideo || (!showOriginal && config.stack.some((e) => e.enabled && e.params?.animate === true));
+      isVideo || (!showOriginal && base.stack.some((e) => e.enabled && e.params?.animate === true));
 
     // engineSource changing is the natural retry point for a prior GL demotion:
     // a new source means a fresh render anyway, so rebuild the preferred engine
@@ -200,25 +215,7 @@ export function Stage() {
       stopped = true;
       cancelAnimationFrame(rafRef.current);
     };
-  }, [config, engineSource, dims, showOriginal]);
-
-  // snapshot the canvas after a frame paints so the tile overlay repeats the
-  // current render. Re-grab on any change that alters the pixels.
-  useEffect(() => {
-    // When off, the overlay is hidden by `tile && tileSrc` — no setState needed
-    // here (avoids a cascading-render). The snapshot re-grabs after a frame paints.
-    if (!tile) return;
-    const c = canvasRef.current;
-    if (!c) return;
-    const raf = requestAnimationFrame(() => {
-      try {
-        setTileSrc(c.toDataURL());
-      } catch {
-        /* tainted/oversized canvas — leave prior snapshot */
-      }
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [tile, config, dims, showOriginal, engineSource]);
+  }, [config, engineSource, dims, showOriginal, sourceReady]);
 
   // wheel zoom toward cursor
   const onWheel = useCallback(
@@ -227,12 +224,14 @@ export function Stage() {
       const el = boxRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      // Zoom about the artwork's resting center, which sits above the
+      // reserved bottom strip (not at the element's geometric center).
       const cx = e.clientX - (r.left + r.width / 2);
-      const cy = e.clientY - (r.top + r.height / 2);
+      const cy = e.clientY - (r.top + (r.height - reserve) / 2);
       const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
       setView((v) => zoomToward(v, factor, cx, cy));
     },
-    [],
+    [reserve],
   );
 
   // drag to pan
@@ -259,7 +258,8 @@ export function Stage() {
   const oneToOne = () => setView({ zoom: clampZoom(dims.W / fit.w), panX: 0, panY: 0 });
 
   return (
-    <div className="relative flex h-full w-full flex-col">
+    <div className="flex h-full w-full flex-col">
+    <div className="relative flex min-h-0 w-full flex-1 flex-col">
       <div
         ref={boxRef}
         onWheel={onWheel}
@@ -267,10 +267,15 @@ export function Stage() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
+        {...dropHandlers}
         // Quiet solid studio surface, one step below the panel canvas so the
         // artwork reads as a print on a table. Theme-aware; transparency is
         // signaled by the canvas element's own checker, not the stage.
         className="relative flex flex-1 cursor-grab touch-none items-center justify-center overflow-hidden bg-shade-10 active:cursor-grabbing dark:bg-shade-1"
+        // Bottom padding holds the toolbar/transport strip clear; the
+        // ResizeObserver reads the content box, so the fit shrinks and the
+        // artwork centers in the space above it.
+        style={{ paddingBottom: reserve }}
       >
         <div
           style={{
@@ -286,18 +291,30 @@ export function Stage() {
             className={cn(
               "rounded-[2px] shadow-5 ring-1 ring-black/[0.06]",
               canBeTransparent && "checker-transparency",
+              empty && "invisible",
             )}
           />
-          {cardMode !== "off" && <CardOverlay mode={cardMode} />}
-          {tile && tileSrc && (
-            <div
-              className="pointer-events-none absolute inset-0 rounded-[2px]"
-              style={{
-                backgroundImage: `url(${tileSrc})`,
-                backgroundSize: "33.333% 33.333%",
-                backgroundRepeat: "repeat",
-              }}
-            />
+          {empty && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-frame border border-dashed border-border-strong px-6 text-center">
+              <ImageDown className="h-5 w-5 text-text-secondary" />
+              <p className="text-[13px] font-medium text-text-primary">
+                {error ?? "No source yet"}
+              </p>
+              <p className="max-w-[320px] text-[12px] leading-snug text-text-secondary">
+                Drop an image or video here, upload one on the left
+                {examplesOpen ? ", or pick an example below." : "."}
+              </p>
+              {!examplesOpen && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => setExamplesOpen(true)}
+                  className={cn(labButton, "mt-1 h-8 rounded-control px-3 text-[12px]")}
+                >
+                  Show examples
+                </button>
+              )}
+            </div>
           )}
         </div>
         {loading && (
@@ -305,11 +322,35 @@ export function Stage() {
             loading…
           </span>
         )}
-        {engineSource?.kind === "video" && <VideoTransport video={engineSource.video} />}
+        {engineSource?.kind === "video" && <VideoTransport video={engineSource.video} compact={compact} />}
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-3 z-20 flex flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-text-primary bg-canvas/80 backdrop-blur-sm">
+            <ImageDown className="h-6 w-6 text-text-primary" />
+            <span className="text-[13px] font-medium text-text-primary">Drop to set as source</span>
+          </div>
+        )}
       </div>
 
       {/* zoom HUD — light pill floating over the editorial stage */}
       <div className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border-default bg-canvas/90 px-1 py-1 text-text-primary shadow-3 backdrop-blur">
+        <IconTip label={examplesOpen ? "Hide examples" : "Show examples"}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className={cn(
+              "pointer-events-auto transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90",
+              examplesOpen ? "text-text-primary" : "text-text-secondary",
+            )}
+            onClick={() => setExamplesOpen(!examplesOpen)}
+            aria-label="Toggle examples"
+            aria-pressed={examplesOpen}
+          >
+            {/* The examples strip is a bottom panel: the icon says which way
+                the click goes (open vs close). */}
+            {examplesOpen ? <PanelBottomClose className="h-3.5 w-3.5" /> : <PanelBottomOpen className="h-3.5 w-3.5" />}
+          </Button>
+        </IconTip>
+        <div className="mx-0.5 h-4 w-px bg-border-default" />
         {/* Original ↔ Edited preview toggle */}
         <div className="pointer-events-auto flex items-center rounded-full bg-surface-active p-0.5 text-[10px] font-medium">
           {([["Original", true], ["Edited", false]] as const).map(([label, orig]) => (
@@ -326,37 +367,6 @@ export function Stage() {
             </button>
           ))}
         </div>
-        <div className="mx-0.5 h-4 w-px bg-border-default" />
-        <IconTip label={cardMode === "off" ? "Preview a UI card" : cardMode === "light" ? "Light card (click for dark)" : "Dark card (click to hide)"}>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className={cn(
-              "pointer-events-auto transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90",
-              cardMode === "off" ? "text-text-secondary" : "text-text-primary",
-            )}
-            onClick={() => setCardMode((m) => nextCard[m])}
-            aria-label="Toggle card preview"
-            aria-pressed={cardMode !== "off"}
-          >
-            <CreditCard className="h-3.5 w-3.5" />
-          </Button>
-        </IconTip>
-        <IconTip label={tile ? "Hide tile preview" : "Preview as 3×3 tile (check seams)"}>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className={cn(
-              "pointer-events-auto transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90",
-              tile ? "text-text-primary" : "text-text-secondary",
-            )}
-            onClick={() => setTile((v) => !v)}
-            aria-label="Toggle tile preview"
-            aria-pressed={tile}
-          >
-            <Grid3x3 className="h-3.5 w-3.5" />
-          </Button>
-        </IconTip>
         <div className="mx-0.5 h-4 w-px bg-border-default" />
         <IconTip label="Zoom out">
           <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView((v) => zoomToward(v, 1 / 1.2, 0, 0))} aria-label="Zoom out">
@@ -380,17 +390,24 @@ export function Stage() {
             <Maximize className="h-3.5 w-3.5" />
           </Button>
         </IconTip>
-        <IconTip label="Zoom to 100%">
-          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={oneToOne} aria-label="100%">
-            <span className="font-mono text-[10px]">1:1</span>
-          </Button>
-        </IconTip>
-        <IconTip label="Reset view">
-          <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Reset">
-            <RotateCcw className="h-3.5 w-3.5" />
-          </Button>
-        </IconTip>
+        {/* Compact stages drop the 1:1 / reset-view extras; zoom + fit remain. */}
+        {!compact && (
+          <>
+            <IconTip label="Zoom to 100%">
+              <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={oneToOne} aria-label="100%">
+                <span className="font-mono text-[10px]">1:1</span>
+              </Button>
+            </IconTip>
+            <IconTip label="Reset view">
+              <Button variant="ghost" size="icon-xs" className="pointer-events-auto text-text-secondary transition-[transform,background-color,color] duration-150 hover:bg-surface-hover hover:text-text-primary active:scale-90" onClick={() => setView(IDENTITY)} aria-label="Reset">
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </IconTip>
+          </>
+        )}
       </div>
+    </div>
+    {examplesOpen && <ExamplesRail />}
     </div>
   );
 }

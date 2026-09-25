@@ -3,7 +3,16 @@ import { toast } from "sonner";
 import { Crop, Shuffle, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GALLERY, TEXTURES, isTextureId, randomGalleryId, randomPexelsId } from "@/lib/bg-lab/presets";
+import {
+  GALLERY,
+  EXAMPLES,
+  TEXTURES,
+  galleryUrl,
+  isTextureId,
+  randomGalleryId,
+  randomPexelsId,
+  exampleSourceId,
+} from "@/lib/bg-lab/presets";
 import type { SourceState } from "@/lib/bg-lab/types";
 import { useBgLab } from "./BgLabProvider";
 import { PexelsSearch } from "./PexelsSearch";
@@ -69,6 +78,20 @@ export function SourcePanel() {
       dispatch({ t: "setSource", patch: { mode: "image", imageId: null } });
       return;
     }
+    // Image and Video share `imageId`. Carrying a clip into the Image tab (or
+    // a photo into Video) is a guaranteed load error, so swap in that tab's
+    // starter instead. Uploads (blob:) carry no type in the id — left alone.
+    const id = source.imageId ?? "";
+    const isVideoId = id.startsWith("pexels:video:");
+    const isPhotoId = !!galleryUrl(id) || (id.startsWith("pexels:") && !isVideoId);
+    if (next === "image" && isVideoId) {
+      dispatch({ t: "setSource", patch: { mode: "image", imageId: GALLERY[0].id, transform: undefined } });
+      return;
+    }
+    if (next === "video" && isPhotoId) {
+      dispatch({ t: "setSource", patch: { mode: "video", imageId: exampleSourceId(EXAMPLES[0]), transform: undefined } });
+      return;
+    }
     dispatch({ t: "setSource", patch: { mode: next } });
   }
 
@@ -112,7 +135,7 @@ export function SourcePanel() {
   return (
     <section className="flex flex-col gap-4">
       <Tabs value={topTab} onValueChange={handleTopTabChange}>
-        <TabsList className="w-full">
+        <TabsList className="w-full" data-tour="source">
           <TabsTrigger value="image" className="flex-1 data-[state=inactive]:hover:text-text-primary">
             Image
           </TabsTrigger>
