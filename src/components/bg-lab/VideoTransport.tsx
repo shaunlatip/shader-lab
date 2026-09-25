@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Repeat, Square } from "lucide-react";
+import { Gauge, Pause, Play, Repeat, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconTip } from "./panel";
 
 const fmt = (s: number) => {
@@ -17,7 +24,7 @@ type VideoWithRVFC = HTMLVideoElement & { requestVideoFrameCallback?: (cb: () =>
 /** Playback transport for a video source: play/pause, stop, scrub, speed, loop,
  * and a live FPS readout. The Stage render loop draws whatever frame the video is
  * on, so this just drives the underlying <video>. */
-export function VideoTransport({ video }: { video: HTMLVideoElement }) {
+export function VideoTransport({ video, compact = false }: { video: HTMLVideoElement; compact?: boolean }) {
   const [playing, setPlaying] = useState(!video.paused);
   const [t, setT] = useState(video.currentTime);
   const [dur, setDur] = useState(video.duration || 0);
@@ -97,61 +104,82 @@ export function VideoTransport({ video }: { video: HTMLVideoElement }) {
     setSpeed(r);
   };
 
+  // Same 24px round buttons as the zoom toolbar below, so the two floating
+  // pills read as one family.
   const iconBtn =
-    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90";
+    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-[transform,background-color,color] duration-150 active:scale-90";
 
   return (
-    <div className="pointer-events-auto absolute bottom-14 left-1/2 flex w-[min(520px,86%)] -translate-x-1/2 flex-col gap-1.5 rounded-2xl border border-border-default bg-canvas/90 px-3 py-2 text-text-primary shadow-3 backdrop-blur">
-      <div className="flex items-center gap-2">
-        <IconTip label={playing ? "Pause" : "Play"}>
-          <button type="button" onClick={toggle} className={cn(iconBtn, "bg-surface-hover hover:bg-surface-active")} aria-label={playing ? "Pause" : "Play"}>
-            {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-          </button>
-        </IconTip>
-        <IconTip label="Stop">
-          <button type="button" onClick={stop} className={cn(iconBtn, "text-text-secondary hover:bg-surface-hover hover:text-text-primary")} aria-label="Stop">
-            <Square className="h-3 w-3" />
-          </button>
-        </IconTip>
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-text-secondary">{fmt(t)}</span>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(0.01, dur)}
-          step={0.01}
-          value={Math.min(t, dur)}
-          onChange={(e) => {
-            video.currentTime = Number(e.target.value);
-            setT(video.currentTime);
-          }}
-          className="h-1 flex-1 cursor-pointer accent-accent"
-        />
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-text-secondary">{fmt(dur)}</span>
-        <IconTip label={loop ? "Loop on" : "Loop off"}>
-          <button type="button" onClick={toggleLoop} className={cn(iconBtn, loop ? "bg-surface-active text-text-primary" : "text-text-secondary hover:bg-surface-hover")} aria-label="Toggle loop">
-            <Repeat className="h-3.5 w-3.5" />
-          </button>
-        </IconTip>
-      </div>
-      <div className="flex items-center justify-between gap-2 px-0.5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-text-secondary">Speed</span>
-          {SPEEDS.map((s) => (
+    // One row, pill-shaped — same radius, border, fill, and shadow as the zoom
+    // toolbar (Stage). Speed lives in a menu so the row stays single-line.
+    <div className="pointer-events-auto absolute bottom-14 left-1/2 flex w-[min(520px,86%)] -translate-x-1/2 items-center gap-1 rounded-full border border-border-default bg-canvas/90 px-1 py-1 text-text-primary shadow-3 backdrop-blur">
+      <IconTip label={playing ? "Pause" : "Play"}>
+        <button type="button" onClick={toggle} className={cn(iconBtn, "bg-surface-hover hover:bg-surface-active")} aria-label={playing ? "Pause" : "Play"}>
+          {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+        </button>
+      </IconTip>
+      <IconTip label="Stop">
+        <button type="button" onClick={stop} className={cn(iconBtn, "text-text-secondary hover:bg-surface-hover hover:text-text-primary")} aria-label="Stop">
+          <Square className="h-3 w-3" />
+        </button>
+      </IconTip>
+      <span className="ml-1 shrink-0 font-mono text-[10px] tabular-nums text-text-secondary">{fmt(t)}</span>
+      <input
+        type="range"
+        min={0}
+        max={Math.max(0.01, dur)}
+        step={0.01}
+        value={Math.min(t, dur)}
+        onChange={(e) => {
+          video.currentTime = Number(e.target.value);
+          setT(video.currentTime);
+        }}
+        aria-label="Seek"
+        className="mx-1 h-1 min-w-0 flex-1 cursor-pointer accent-accent"
+      />
+      <span className="mr-1 shrink-0 font-mono text-[10px] tabular-nums text-text-secondary">{fmt(dur)}</span>
+      <DropdownMenu>
+        <IconTip label={`Speed · ${speed}×`}>
+          <DropdownMenuTrigger asChild>
             <button
-              key={s}
               type="button"
-              onClick={() => setRate(s)}
+              aria-label={`Playback speed, ${speed}×`}
               className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] tabular-nums transition-colors",
-                speed === s ? "bg-surface-active text-text-primary" : "text-text-secondary hover:text-text-primary",
+                iconBtn,
+                // Widens to show the rate whenever it isn't the default.
+                speed !== 1 && "w-auto gap-0.5 px-1.5",
+                speed !== 1 ? "bg-surface-active text-text-primary" : "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+                "data-[state=open]:bg-surface-active data-[state=open]:text-text-primary",
               )}
             >
-              {s}×
+              <Gauge className="h-3.5 w-3.5" />
+              {speed !== 1 && <span className="font-mono text-[10px] tabular-nums">{speed}×</span>}
             </button>
-          ))}
-        </div>
-        <span className="font-mono text-[10px] tabular-nums text-text-secondary">{fps} fps</span>
-      </div>
+          </DropdownMenuTrigger>
+        </IconTip>
+        <DropdownMenuContent side="top" align="end" sideOffset={8} className="lab-chrome font-lab min-w-[96px] border-border-default bg-canvas text-text-primary">
+          <DropdownMenuRadioGroup value={String(speed)} onValueChange={(v) => setRate(Number(v))}>
+            {SPEEDS.map((s) => (
+              <DropdownMenuRadioItem
+                key={s}
+                value={String(s)}
+                className="cursor-pointer font-mono text-[12px] tabular-nums text-text-primary focus:bg-canvas-inverted/10 focus:text-text-primary"
+              >
+                {s}×
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <IconTip label={loop ? "Loop on" : "Loop off"}>
+        <button type="button" onClick={toggleLoop} className={cn(iconBtn, loop ? "bg-surface-active text-text-primary" : "text-text-secondary hover:bg-surface-hover")} aria-label="Toggle loop">
+          <Repeat className="h-3.5 w-3.5" />
+        </button>
+      </IconTip>
+      {/* Live playback fps — a diagnostic readout, dropped on compact stages. */}
+      {!compact && (
+        <span className="mr-2 ml-1 w-[42px] shrink-0 text-right font-mono text-[10px] tabular-nums text-text-secondary">{fps} fps</span>
+      )}
     </div>
   );
 }

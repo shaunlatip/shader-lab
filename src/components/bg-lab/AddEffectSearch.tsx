@@ -108,7 +108,7 @@ export function AddEffectSearch() {
               if (items.length === 0) return null;
               return (
                 <div key={cat}>
-                  <p className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                  <p className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-text-secondary">
                     {CATEGORY_LABEL[cat]}
                   </p>
                   {items.map((t) => {
@@ -133,9 +133,7 @@ export function AddEffectSearch() {
                         <div className="flex w-full items-baseline justify-between gap-2">
                           <span className="text-[13px] font-medium text-text-primary">{m.label}</span>
                           {m.heavy && (
-                            <span className="shrink-0 text-[10px] uppercase tracking-wide text-text-secondary">
-                              heavy
-                            </span>
+                            <span className="shrink-0 text-[11px] text-text-secondary">Heavy</span>
                           )}
                         </div>
                         <span className="text-[11px] leading-snug text-text-secondary">{m.blurb}</span>

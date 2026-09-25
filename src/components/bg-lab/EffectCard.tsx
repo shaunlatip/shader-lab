@@ -129,7 +129,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
                             advOpen && "rotate-90",
                           )}
                         />
-                        <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                        <span className="text-[11px] font-medium text-text-secondary">
                           {meta.groupLabels?.[g] ?? CONTROL_GROUP_LABEL[g]}
                         </span>
                       </button>
@@ -140,7 +140,7 @@ export function EffectCard({ effect }: { effect: Effect }) {
 
                 return (
                   <div key={g} className="flex flex-col gap-2.5">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                    <span className="text-[11px] font-medium text-text-secondary">
                       {meta.groupLabels?.[g] ?? CONTROL_GROUP_LABEL[g]}
                     </span>
                     {rows.map(row)}

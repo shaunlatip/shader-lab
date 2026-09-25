@@ -93,12 +93,16 @@ export function makeEffect(type: EffectType): Effect {
   return { id: nanoid(8), type, enabled: true, params: defaultParams(type) };
 }
 
+/** First visit (and Reset) opens on the lead example — a video already running
+ * through a preset — so the canvas shows what the lab does before any input.
+ * 16:9 matches the example videos. */
 export function makeDefaultConfig(): BgConfig {
+  const lead = EXAMPLES[0];
   return {
     version: 1,
-    output: { aspect: "3:2", longEdge: 2000 },
-    source: { mode: "image", imageId: "mon-haystack", solidColor: "#cdd9e0" },
-    stack: [makeEffect("pixelate"), makeEffect("grain")],
+    output: { aspect: "16:9", longEdge: 2000 },
+    source: { mode: "video", imageId: exampleSourceId(lead), solidColor: "#cdd9e0" },
+    stack: presetBySlug(lead.preset)?.build() ?? [makeEffect("pixelate"), makeEffect("grain")],
   };
 }
 
@@ -247,7 +251,14 @@ export const PRESETS: Preset[] = [
     name: "Ink sketch",
     category: "Paint",
     curated: true,
-    build: () => [withParams("lineArt", { mode: "outline", thickness: 1.8, threshold: 0.35 }), withParams("grain", { amount: 0.06 })],
+    // XDoG, not Sobel outline: the hard-threshold outline goes sparse on
+    // smooth subjects and blobby on texture. XDoG keeps edge emphasis plus a
+    // tonal fill, so it reads as a pen drawing on any source. Low threshold
+    // keeps most of the frame paper.
+    build: () => [
+      withParams("lineArt", { mode: "xdog", sigma: 1.5, threshold: 0.35, edgeSoftness: 14 }),
+      withParams("grain", { amount: 0.05 }),
+    ],
   },
   {
     slug: "brushwork",
@@ -262,18 +273,57 @@ export const PRESETS: Preset[] = [
 
   // ---------------------------------------------------------------- Print
   // Dither, dots, halftone — in that priority order.
+  // Ordered Bayer 8×8 leads Print, not Floyd–Steinberg: diffusion dithers at
+  // single-pixel pitch (it ignores cell scale) and reshuffles every video
+  // frame, so it reads as noise. Bayer's fixed matrix is stable in motion.
+  // Colour dither (per-channel, 2 levels = 8-colour palette) — Shaun's tuned
+  // stack. The ink/paper gradient map ships disabled: one toggle turns it
+  // into the mono print variant.
+  {
+    slug: "bayer-dither",
+    name: "Bayer 8×8",
+    category: "Print",
+    curated: true,
+    build: () => {
+      const inkPaper = withParams("gradientMap", {
+        stops: [
+          { t: 0, color: "#16140f" },
+          { t: 1, color: "#f1ece4" },
+        ],
+      });
+      inkPaper.enabled = false;
+      return [
+        withParams("adjust", { contrast: 1.15 }),
+        withParams("dither", { type: "bayer8", levels: 2, scale: 3, mono: false }),
+        inkPaper,
+      ];
+    },
+  },
   {
     slug: "floyd-dither",
     name: "Floyd dither",
     category: "Print",
-    curated: true,
     build: () => [withParams("dither", { type: "floydSteinberg", levels: 2, mono: true })],
+  },
+  // The Halftone effect's showcase: a tone pre-pass (brighter + harder) clears
+  // skies and midtones to paper so subjects print as bold riso-red screens,
+  // with only a light dot gradient left in the highlights. Square dots on a
+  // 46° screen — Shaun's tuned stack (Copy spec, 2026-09-25).
+  {
+    slug: "riso-halftone",
+    name: "Riso halftone",
+    category: "Print",
+    curated: true,
+    build: () => [
+      withParams("adjust", { brightness: 1.15, contrast: 1.4 }),
+      withParams("halftone", { cell: 10, angle: 46, dotShape: "square", ink: "#d9412b", paper: "#f3ecdf" }),
+      withParams("grain", { amount: 0.05, blend: "multiply" }),
+    ],
   },
   {
     slug: "halftone-dots",
     name: "Halftone dots",
     category: "Print",
-    curated: true,
     build: () => [makeEffect("grayscale"), withParams("glyphDots", { cell: 9, ink: "#111111", paper: "#f3efe6" })],
   },
   {
@@ -283,12 +333,14 @@ export const PRESETS: Preset[] = [
     curated: true,
     build: () => [makeEffect("grayscale"), withParams("halftone", { cell: 8, mode: "mono", aa: true })],
   },
+  // Softened contrast + gooey dots so the four screens merge into ink blobs —
+  // Shaun's tuned stack on the Koi example (Copy spec, 2026-09-25).
   {
     slug: "cmyk-print",
     name: "CMYK print",
     category: "Print",
     curated: true,
-    build: () => [withParams("halftone", { cell: 9, mode: "cmyk", aa: true })],
+    build: () => [withParams("halftone", { cell: 9, mode: "cmyk", aa: true, contrast: 0.8, gooey: 0.54 })],
   },
   {
     slug: "risograph",
@@ -319,12 +371,6 @@ export const PRESETS: Preset[] = [
     name: "Blue noise",
     category: "Print",
     build: () => [withParams("dither", { type: "blueNoise", levels: 2, mono: true })],
-  },
-  {
-    slug: "bayer-dither",
-    name: "Bayer dither",
-    category: "Print",
-    build: () => [withParams("dither", { type: "bayer4", levels: 2, mono: true })],
   },
   {
     slug: "coarse-bayer",
@@ -358,13 +404,14 @@ export const PRESETS: Preset[] = [
   },
 
   // ---------------------------------------------------------------- Glitch
-  // Mosaic leads — the last of the explicitly prioritized effects.
+  // Mosaic leads — the last of the explicitly prioritized effects. Values are
+  // Shaun's tuned stack on the Surf example (Copy spec, 2026-09-25).
   {
     slug: "mosaic-tiles",
     name: "Mosaic tiles",
     category: "Glitch",
     curated: true,
-    build: () => [withParams("mosaic", { size: 22, gap: 0.12 })],
+    build: () => [withParams("mosaic", { size: 19, gap: 0.14, shape: "square" })],
   },
   {
     slug: "vhs-glitch",
@@ -658,3 +705,111 @@ export const CURATED_PRESETS = PRESETS.filter((p) => p.curated);
 // Priority order per the maximeheckel-style effects: Paint (Kuwahara, line
 // art) leads, then Print (dither/dots/halftone), then Glitch (mosaic).
 export const PRESET_CATEGORY_ORDER: PresetCategory[] = ["Surface", "Paint", "Print", "Glitch", "Text", "Film", "Grade"];
+
+export function presetBySlug(slug: string): Preset | undefined {
+  return PRESETS.find((p) => p.slug === slug);
+}
+
+// ------------------------------------------------------------------ Examples
+// Examples: a free Pexels video paired with a preset — the onboarding surface
+// under the canvas. Subjects stay in nature — landscape, flora, simple fauna
+// (fish, jellyfish, butterflies); no people or mammals. Each pairing was
+// picked so the subject shows the effect off (a white jellyfish on black for
+// ASCII glow, a crowd of koi for CMYK dots), alternating color and mono.
+// Every preset here runs as a GL pass, so the examples play at full frame
+// rate. Videos stream from the Pexels CDN (CORS *, so exports stay
+// untainted); the Pexels license needs no attribution, credit is courtesy.
+// Order is the rail order; EXAMPLES[0] is the landing example.
+// Taxonomy (user-facing too): a *preset* is an effect stack that applies to
+// any source; an *example* is a source + preset pairing.
+export interface Example {
+  /** Stable key — names the thumbnail at /examples/<slug>.webp. */
+  slug: string;
+  subject: string;
+  /** Preset slug applied on top of the video. */
+  preset: string;
+  /** mp4 on the Pexels CDN (~720p). */
+  video: string;
+  /** Pexels poster frame — the /dev/thumbs source for the example thumbnail. */
+  poster: string;
+  credit: string;
+  /** The video's Pexels page (as returned by the API) — cited by Copy spec. */
+  page: string;
+}
+
+const pexelsPoster = (id: string, file: string) =>
+  `https://images.pexels.com/videos/${id}/${file}?auto=compress&cs=tinysrgb&fit=crop&h=630&w=1200`;
+
+export const EXAMPLES: Example[] = [
+  {
+    slug: "jellyfish-ascii",
+    subject: "Jellyfish",
+    preset: "ascii-glow",
+    video: "https://videos.pexels.com/video-files/11277955/11277955-hd_1280_720_31fps.mp4",
+    poster: pexelsPoster("11277955", "jelly-fish-jelly-fish-underwater-jellyfish-jellyfish-tentacles-11277955.jpeg"),
+    credit: "Yudha Aprilian",
+    page: "https://www.pexels.com/video/jellyfish-under-water-11277955/",
+  },
+  {
+    slug: "koi-cmyk",
+    subject: "Koi",
+    preset: "cmyk-print",
+    video: "https://videos.pexels.com/video-files/6392574/6392574-hd_1280_720_30fps.mp4",
+    poster: pexelsPoster("6392574", "pexels-photo-6392574.jpeg"),
+    credit: "Piya Nimityongskul",
+    page: "https://www.pexels.com/video/colorful-fishes-in-a-river-6392574/",
+  },
+  {
+    slug: "palms-halftone",
+    subject: "Palms",
+    preset: "riso-halftone",
+    video: "https://videos.pexels.com/video-files/19434489/19434489-hd_1280_720_24fps.mp4",
+    poster: pexelsPoster("19434489", "afternoon-bend-bending-blow-19434489.jpeg"),
+    credit: "Emmett Loverde",
+    page: "https://www.pexels.com/video/san-diego-palm-trees-blowing-in-storm-winds-19434489/",
+  },
+  {
+    slug: "butterfly-oil",
+    subject: "Butterfly",
+    preset: "oil-paint",
+    video: "https://videos.pexels.com/video-files/35020795/14835619_1280_720_24fps.mp4",
+    poster: pexelsPoster("35020795", "pexels-photo-35020795.jpeg"),
+    credit: "Tường Chopper",
+    page: "https://www.pexels.com/video/vibrant-butterfly-on-yellow-flowers-in-summer-35020795/",
+  },
+  {
+    // Timelapse: the clouds keep moving, and their soft gradients give the
+    // 8×8 matrix the full tonal range to show off.
+    slug: "clouds-bayer",
+    subject: "Clouds",
+    preset: "bayer-dither",
+    video: "https://videos.pexels.com/video-files/5865939/5865939-hd_1280_720_30fps.mp4",
+    poster: pexelsPoster("5865939", "pexels-photo-5865939.jpeg"),
+    credit: "Tolga KARAKAYA",
+    page: "https://www.pexels.com/video/time-lapse-video-of-white-clouds-in-the-sky-5865939/",
+  },
+  {
+    // Pixel dots needs motion to read — flowing lava keeps every dot changing.
+    slug: "lava-dots",
+    subject: "Lava",
+    preset: "pixel-dots",
+    video: "https://videos.pexels.com/video-files/20217377/20217377-hd_1280_720_25fps.mp4",
+    poster: pexelsPoster("20217377", "lava-20217377.jpeg"),
+    credit: "Eugenio Manghi",
+    page: "https://www.pexels.com/video/lava-and-eruption-4-20217377/",
+  },
+  {
+    slug: "surf-mosaic",
+    subject: "Surf",
+    preset: "mosaic-tiles",
+    video: "https://videos.pexels.com/video-files/15226109/15226109-hd_1280_720_60fps.mp4",
+    poster: pexelsPoster("15226109", "4k-sea-15226109.jpeg"),
+    credit: "Salva F. Ayala",
+    page: "https://www.pexels.com/video/4k-drone-mediterraneo-15226109/",
+  },
+];
+
+/** The `imageId` a example's video uses (same scheme as Pexels video search). */
+export function exampleSourceId(r: Example): string {
+  return `pexels:video:${r.video}`;
+}

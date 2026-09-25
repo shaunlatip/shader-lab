@@ -44,6 +44,22 @@ export const GRADIENT_TYPE_OPTIONS: { value: GradientType; label: string }[] = (
   ["linear", "radial", "conic", "mesh", "warp", "reaction"] as GradientType[]
 ).map((t) => ({ value: t, label: GRADIENT_TYPE_LABEL[t] }));
 
+// Which geometry knobs a gradient type actually reads — hiding dead knobs (a
+// radius slider on a linear ramp) keeps the panel trustworthy, same rule as
+// PATTERN_APPLIES. Keys absent here apply to every type.
+export const GRADIENT_APPLIES: Partial<Record<string, GradientType[]>> = {
+  angle: ["linear", "conic", "warp"],
+  cx: ["radial", "conic"],
+  cy: ["radial", "conic"],
+  radius: ["radial"],
+  scale: ["warp"],
+  warp: ["warp"],
+  seed: ["warp", "reaction"],
+  seamless: ["warp"],
+  feed: ["reaction"],
+  kill: ["reaction"],
+};
+
 // `stops` is a gradient control; the rest are sliders/select. Schema + clamp
 // walk this list, so a pasted gradient can never crash the render.
 export const GRADIENT_CONTROLS: ControlSpec[] = [

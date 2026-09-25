@@ -70,7 +70,7 @@ export function ExportBar() {
   const label = exporting ? `${verb}… ${pct}%` : isSeq ? "Export PNG sequence" : `Export ${format.toUpperCase()}`;
 
   return (
-    <div className="border-t border-border-default bg-canvas p-3">
+    <div data-tour="export" className="border-t border-border-default bg-canvas p-3">
       <CollapsibleSection title="Export" defaultOpen={false} reverse>
         <div className="flex flex-col gap-2.5">
       <div className={ROW}>

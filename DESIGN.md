@@ -18,11 +18,11 @@ Strategy: Restrained. True-gray neutrals only; no cream, beige, or warm paper ti
 
 ## Typography
 
-- UI/body: **General Sans** (Fontshare, self-hosted variable), `--font-lab`. 12–13px controls, 13–14px body. Fixed px, no fluid scaling.
-- Display: **Cabinet Grotesk** (Fontshare, self-hosted variable), `--font-nagel` slot: wordmark, effect titles, section headers.
+- UI/body and titles: **Hibana** 45 SubMedium (OFL, self-hosted, single weight 500), `--font-lab` and the `--font-nagel` slot (effect titles, section headers). 12–13px controls, 13–14px body. Fixed px, no fluid scaling.
+- Wordmark: **Fontlab Font** (OFL, self-hosted, single weight), `--font-logo`, the header "shaderlab" only.
 - Values/code: **Geist Mono** (`--font-mono`): hex fields, numeric readouts, export dimensions.
 - Engine glyph rendering keeps `ui-monospace` — never couple UI fonts to render output.
-- Scale ratio ~1.2; hierarchy through weight (500/600) over size where space is tight.
+- Scale ratio ~1.2. Hibana has one weight (500) and weight synthesis is off, so every weight utility renders at 500; hierarchy comes from size and color (text-primary vs text-secondary).
 
 ## Radius register
 

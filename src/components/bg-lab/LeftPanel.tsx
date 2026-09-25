@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import { ImageDown } from "lucide-react";
-import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useBgLab } from "./BgLabProvider";
 import { CollapsibleSection } from "./panel";
+import { useSourceDrop } from "./useSourceDrop";
 import { SourcePanel } from "./SourcePanel";
 import { DraftsPanel } from "./DraftsPanel";
 import { ExportBar } from "./ExportBar";
@@ -21,47 +20,30 @@ import { ExportBar } from "./ExportBar";
  * object-URL path as the Upload buttons in SourcePanel), so you don't have to
  * hunt for the right sub-tab first.
  */
-export function LeftPanel({ width, collapsed }: { width: number; collapsed: boolean }) {
-  const { dispatch } = useBgLab();
-  const [dragOver, setDragOver] = useState(false);
+export function LeftPanel({
+  width,
+  collapsed,
+  drawer = false,
+}: {
+  width: number;
+  collapsed: boolean;
+  /** Slide-over over the stage (narrow windows) instead of docked beside it. */
+  drawer?: boolean;
+}) {
+  const { dragOver, dropHandlers } = useSourceDrop();
 
   if (collapsed) return null;
-
-  function handleFiles(files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
-    const mode = file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : null;
-    if (!mode) {
-      toast.error("Unsupported file", { description: "Drop an image or video file." });
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    dispatch({ t: "setSource", patch: { mode, imageId: url } });
-  }
 
   return (
     <aside
       style={{ width }}
-      onDragOver={(e) => {
-        // Required for onDrop to fire at all; only react to actual files
-        // (not e.g. an internal text/slider drag) so we don't flash the
-        // overlay for unrelated drag interactions.
-        if (e.dataTransfer.types.includes("Files")) {
-          e.preventDefault();
-          setDragOver(true);
-        }
-      }}
-      onDragLeave={(e) => {
-        // Only clear when the pointer actually leaves the aside (not when it
-        // moves between children, which also fires dragleave on the parent).
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragOver(false);
-        handleFiles(e.dataTransfer.files);
-      }}
-      className="relative flex shrink-0 flex-col overflow-hidden border-r border-border-default bg-canvas"
+      {...dropHandlers}
+      className={cn(
+        "relative flex shrink-0 flex-col overflow-hidden border-r border-border-default bg-canvas",
+        // Leaves a 48px strip of scrim to tap-close on phones.
+        drawer &&
+          "absolute inset-y-0 left-0 z-40 max-w-[calc(100vw-48px)] shadow-5 motion-safe:animate-in motion-safe:slide-in-from-left motion-safe:duration-200",
+      )}
     >
       <ScrollArea id="left-panel-body" className="min-h-0 flex-1">
         <div className="flex flex-col gap-5 p-3">
